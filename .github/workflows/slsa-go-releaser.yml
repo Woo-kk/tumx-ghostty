@@ -1,0 +1,64 @@
+name: SLSA Go releaser
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions: read-all
+
+jobs:
+  args:
+    runs-on: ubuntu-latest
+    outputs:
+      build-date: ${{ steps.meta.outputs.build-date }}
+      commit: ${{ steps.meta.outputs.commit }}
+      release-repo: ${{ steps.meta.outputs.release-repo }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute metadata
+        id: meta
+        shell: bash
+        run: |
+          short_sha="${GITHUB_SHA::7}"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME}"
+          else
+            version="dev-${short_sha}"
+          fi
+          echo "build-date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "commit=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "release-repo=${GITHUB_REPOSITORY}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: args
+    strategy:
+      matrix:
+        include:
+          - target: tmux-ghostty-darwin-amd64
+            config-file: .slsa-goreleaser/tmux-ghostty-darwin-amd64.yml
+          - target: tmux-ghostty-darwin-arm64
+            config-file: .slsa-goreleaser/tmux-ghostty-darwin-arm64.yml
+          - target: tmux-ghostty-broker-darwin-amd64
+            config-file: .slsa-goreleaser/tmux-ghostty-broker-darwin-amd64.yml
+          - target: tmux-ghostty-broker-darwin-arm64
+            config-file: .slsa-goreleaser/tmux-ghostty-broker-darwin-arm64.yml
+    permissions:
+      id-token: write
+      contents: write
+      actions: read
+    uses: slsa-framework/slsa-github-generator/.github/workflows/builder_go_slsa3.yml@v2.1.0
+    with:
+      go-version-file: go.mod
+      config-file: ${{ matrix.config-file }}
+      compile-builder: true
+      evaluated-envs: "VERSION:${{ needs.args.outputs.version }}, COMMIT:${{ needs.args.outputs.commit }}, BUILD_DATE:${{ needs.args.outputs['build-date'] }}, RELEASE_REPO:${{ needs.args.outputs['release-repo'] }}"

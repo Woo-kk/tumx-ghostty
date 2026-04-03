@@ -1,0 +1,16 @@
+version: 1
+env:
+  - GO111MODULE=on
+  - CGO_ENABLED=0
+flags:
+  - -trimpath
+goos: darwin
+goarch: arm64
+main: ./cmd/tmux-ghostty
+binary: tmux-ghostty-darwin-arm64
+ldflags:
+  - "-X github.com/guyuanshun/tmux-ghostty/internal/buildinfo.Version={{ .Env.VERSION }}"
+  - "-X github.com/guyuanshun/tmux-ghostty/internal/buildinfo.Commit={{ .Env.COMMIT }}"
+  - "-X github.com/guyuanshun/tmux-ghostty/internal/buildinfo.BuildDate={{ .Env.BUILD_DATE }}"
+  - "-X github.com/guyuanshun/tmux-ghostty/internal/buildinfo.ReleaseRepo={{ .Env.RELEASE_REPO }}"
+  - "-X github.com/guyuanshun/tmux-ghostty/internal/buildinfo.PackageID=com.guyuanshun.tmux-ghostty"
