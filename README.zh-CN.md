@@ -75,9 +75,27 @@ tmux-ghostty observe <pane-id>
 tmux-ghostty actions
 tmux-ghostty approve <action-id>
 tmux-ghostty deny <action-id>
+
+tmux-ghostty command preview <pane-id> <command...>
+tmux-ghostty command send <pane-id> <command...>
+tmux-ghostty help
 ```
 
-另外还提供 `command preview` 和 `command send` 子命令，它们走的是同一套 broker RPC，主要给 agent 侧流程使用。
+`tmux-ghostty help` 会输出完整命令列表。`tmux-ghostty -h` 和 `tmux-ghostty --help` 是等价别名。
+
+## 命令分级
+
+`command preview` 会把命令分成 3 个级别：
+
+- `read`：只读命令，直接发送，不需要审批。示例：`pwd`、`ls`、`cat`、`rg`、`ps`、`kubectl get ns`、`git status -sb`
+- `nav`：导航或环境准备类命令，也会直接发送，不需要审批。示例：`cd /tmp`、`export KUBECONFIG=...`、`source env.sh`
+- `risky`：可能修改状态，或者分类器无法安全识别的命令。此类命令需要先执行 `tmux-ghostty approve <action-id>`，然后才能继续 `command send`。示例：`rm -rf ...`、`kubectl apply -f ...`、`kubectl delete ...`、`helm upgrade ...`、`echo hi > file.txt`
+
+当前分级规则是基于前缀匹配的保守策略：
+
+- 包含 `&&`、`||`、`;`、`|`、`>`、`>>`、`<`、`<<`、命令替换或多行输入的命令，都会直接归类为 `risky`
+- 未识别的命令默认也归类为 `risky`
+- JumpServer 菜单式输入，例如 `/1201` 或 `1`，当前没有做特殊放行，因此也会被归类为 `risky`
 
 ## 运行时路径
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -18,6 +19,28 @@ func main() {
 	os.Exit(run(os.Args[1:]))
 }
 
+const usageText = `Usage:
+  tmux-ghostty up
+  tmux-ghostty down [--force]
+  tmux-ghostty status
+  tmux-ghostty workspace create
+  tmux-ghostty workspace reconcile
+  tmux-ghostty workspace close <workspace-id>
+  tmux-ghostty pane list
+  tmux-ghostty pane focus <pane-id>
+  tmux-ghostty pane snapshot <pane-id>
+  tmux-ghostty host attach <pane-id> <query>
+  tmux-ghostty claim <pane-id> --actor agent|user
+  tmux-ghostty release <pane-id>
+  tmux-ghostty interrupt <pane-id>
+  tmux-ghostty observe <pane-id>
+  tmux-ghostty actions
+  tmux-ghostty approve <action-id>
+  tmux-ghostty deny <action-id>
+  tmux-ghostty command preview <pane-id> <command...>
+  tmux-ghostty command send <pane-id> <command...>
+  tmux-ghostty help`
+
 func run(args []string) int {
 	if len(args) > 0 && args[0] == "serve-broker" {
 		if err := app.RunBrokerProcess(); err != nil {
@@ -27,14 +50,18 @@ func run(args []string) int {
 		return 0
 	}
 
+	if len(args) == 0 {
+		usage()
+		return 1
+	}
+	if args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
+		printUsage(os.Stdout)
+		return 0
+	}
+
 	paths, err := app.DefaultPaths()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-
-	if len(args) == 0 {
-		usage()
 		return 1
 	}
 
@@ -384,24 +411,11 @@ func runCommand(ctx context.Context, paths app.Paths, args []string) int {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `Usage:
-  tmux-ghostty up
-  tmux-ghostty down [--force]
-  tmux-ghostty status
-  tmux-ghostty workspace create
-  tmux-ghostty workspace reconcile
-  tmux-ghostty workspace close <workspace-id>
-  tmux-ghostty pane list
-  tmux-ghostty pane focus <pane-id>
-  tmux-ghostty pane snapshot <pane-id>
-  tmux-ghostty host attach <pane-id> <query>
-  tmux-ghostty claim <pane-id> --actor agent|user
-  tmux-ghostty release <pane-id>
-  tmux-ghostty interrupt <pane-id>
-  tmux-ghostty observe <pane-id>
-  tmux-ghostty actions
-  tmux-ghostty approve <action-id>
-  tmux-ghostty deny <action-id>`)
+	printUsage(os.Stderr)
+}
+
+func printUsage(w io.Writer) {
+	fmt.Fprintln(w, usageText)
 }
 
 func printJSON(value any) {

@@ -75,9 +75,27 @@ tmux-ghostty observe <pane-id>
 tmux-ghostty actions
 tmux-ghostty approve <action-id>
 tmux-ghostty deny <action-id>
+
+tmux-ghostty command preview <pane-id> <command...>
+tmux-ghostty command send <pane-id> <command...>
+tmux-ghostty help
 ```
 
-There are also `command preview` and `command send` subcommands wired to the same broker RPCs for agent-facing flows.
+`tmux-ghostty help` prints the full command list. `tmux-ghostty -h` and `tmux-ghostty --help` are equivalent aliases.
+
+## Command Risk Levels
+
+`command preview` classifies commands into 3 levels:
+
+- `read`: read-only commands, sent directly without approval. Examples: `pwd`, `ls`, `cat`, `rg`, `ps`, `kubectl get ns`, `git status -sb`
+- `nav`: shell/navigation setup commands, also sent directly without approval. Examples: `cd /tmp`, `export KUBECONFIG=...`, `source env.sh`
+- `risky`: commands that may mutate state or that the classifier cannot safely recognize. These require `tmux-ghostty approve <action-id>` before `command send` can continue. Examples: `rm -rf ...`, `kubectl apply -f ...`, `kubectl delete ...`, `helm upgrade ...`, `echo hi > file.txt`
+
+Current classification is prefix-based and intentionally conservative:
+
+- shell combiners and redirections such as `&&`, `||`, `;`, `|`, `>`, `>>`, `<`, `<<`, command substitution, or multi-line input are always `risky`
+- unknown commands also fall back to `risky`
+- JumpServer menu-style inputs such as `/1201` or `1` are currently not special-cased, so they are also treated as `risky`
 
 ## Runtime Paths
 
