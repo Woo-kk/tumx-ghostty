@@ -59,6 +59,9 @@ go build ./cmd/tmux-ghostty-broker
 ```bash
 make release-binaries VERSION=v0.1.0
 make package VERSION=v0.1.0
+make install-tarball VERSION=v0.1.0
+make homebrew-formula VERSION=v0.1.0
+make publish-homebrew-tap VERSION=v0.1.0
 ```
 
 `make package` 会生成：
@@ -66,6 +69,7 @@ make package VERSION=v0.1.0
 - `dist/release/<version>/tmux-ghostty_<version>_darwin_universal.tar.gz`
 - `dist/release/<version>/tmux-ghostty_<version>_darwin_universal.pkg`
 - `dist/release/<version>/checksums.txt`
+- `dist/release/<version>/homebrew/Formula/tmux-ghostty.rb`
 
 ## 命令行
 
@@ -110,6 +114,72 @@ tmux-ghostty help
 
 ## 安装、升级、卸载
 
+### 用 tar.gz 安装
+
+你可以不走 `.pkg`，直接通过 release tarball 安装：
+
+```bash
+./scripts/install-tarball.sh --version v0.1.0
+```
+
+也可以直接安装本地构建出的归档包：
+
+```bash
+./scripts/install-tarball.sh --archive dist/release/v0.1.0/tmux-ghostty_v0.1.0_darwin_universal.tar.gz
+```
+
+### 用 Homebrew 安装
+
+这个仓库现在可以生成一个可发布的 Homebrew formula 文件：
+
+```bash
+make homebrew-formula VERSION=v0.1.0
+```
+
+生成结果位于：
+
+```text
+dist/release/<version>/homebrew/Formula/tmux-ghostty.rb
+```
+
+但要真正通过 Homebrew 发布，你仍然需要一个单独的 tap 仓库，并在其中放置：
+
+```text
+Formula/tmux-ghostty.rb
+```
+
+Homebrew 发布需要额外配置这些内容：
+
+- 创建一个公开 tap 仓库，例如 `<owner>/homebrew-tmux-ghostty`，并先初始化默认分支。
+- 在当前仓库里添加 Actions 变量：`HOMEBREW_TAP_REPO=<owner>/homebrew-tmux-ghostty`
+- 在当前仓库里添加 Actions secret：`HOMEBREW_TAP_TOKEN=<fine-grained PAT>`。这个 token 只需要对 tap 仓库有 `contents:write` 权限。
+
+可选配置：
+
+- `HOMEBREW_TAP_BRANCH=main`
+- `HOMEBREW_TAP_FORMULA_PATH=Formula/tmux-ghostty.rb`
+- `TMUX_GHOSTTY_HOMEBREW_FORMULA=tmux-ghostty`
+- `TMUX_GHOSTTY_HOMEBREW_CLASS=TmuxGhostty`
+- `TMUX_GHOSTTY_HOMEBREW_HOMEPAGE=https://github.com/<owner>/<repo>`
+- `TMUX_GHOSTTY_HOMEBREW_DESC=Shared terminal broker for Ghostty powered by tmux`
+
+这些配好后，现有的 release workflow 会在每次打 tag 发布后，自动把生成出的 formula 同步到 tap 仓库。若你要在本地手动推送，可以执行：
+
+```bash
+HOMEBREW_TAP_REPO=<owner>/homebrew-tmux-ghostty \
+HOMEBREW_TAP_TOKEN=<token> \
+make publish-homebrew-tap VERSION=v0.1.0
+```
+
+tap 准备好之后，终端用户的使用方式是：
+
+```bash
+brew tap <owner>/tmux-ghostty
+brew install tmux-ghostty
+brew upgrade tmux-ghostty
+brew uninstall tmux-ghostty
+```
+
 macOS 安装包会把两个二进制放到：
 
 ```text
@@ -132,6 +202,8 @@ sudo tmux-ghostty uninstall
 - `/usr/local/bin/tmux-ghostty`
 - `/usr/local/bin/tmux-ghostty-broker`
 - `~/Library/Application Support/tmux-ghostty/`
+
+如果是通过 Homebrew 安装，`tmux-ghostty self-update` 和 `tmux-ghostty uninstall` 会被主动拦住。此时应使用 `brew upgrade tmux-ghostty` 和 `brew uninstall tmux-ghostty`。
 
 ## 命令分级
 
@@ -184,7 +256,9 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-这个 workflow 会分别构建 `darwin/amd64` 和 `darwin/arm64` 的两个二进制，合并 universal binary，生成 `.pkg`，在 Apple 签名 secrets 配好时执行公证，并把 `.pkg`、`.tar.gz` 和 `checksums.txt` 上传到 GitHub Release。
+这个 workflow 会分别构建 `darwin/amd64` 和 `darwin/arm64` 的两个二进制，合并 universal binary，生成 `.pkg`，在 Apple 签名 secrets 配好时执行公证，额外生成 Homebrew formula 文件，并把 `.pkg`、`.tar.gz`、`checksums.txt` 和 formula 文件一起上传到 GitHub Release。
+
+如果你已经配置了 `HOMEBREW_TAP_REPO` 和 `HOMEBREW_TAP_TOKEN`，同一个 workflow 还会自动把 formula 提交到 tap 仓库。
 
 ## 说明
 

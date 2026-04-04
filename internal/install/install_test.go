@@ -11,3 +11,27 @@ func TestAssetNames(t *testing.T) {
 		t.Fatalf("ArchiveAssetName() = %q", got)
 	}
 }
+
+func TestDetectInstallationMethod(t *testing.T) {
+	testCases := []struct {
+		path string
+		want InstallationMethod
+	}{
+		{path: "/opt/homebrew/Cellar/tmux-ghostty/1.2.3/bin/tmux-ghostty", want: InstallationMethodHomebrew},
+		{path: "/usr/local/Cellar/tmux-ghostty/1.2.3/bin/tmux-ghostty-broker", want: InstallationMethodHomebrew},
+		{path: "/usr/local/bin/tmux-ghostty", want: InstallationMethodDirect},
+		{path: "", want: InstallationMethodUnknown},
+	}
+
+	for _, testCase := range testCases {
+		if got := DetectInstallationMethod(testCase.path); got != testCase.want {
+			t.Fatalf("DetectInstallationMethod(%q) = %q, want %q", testCase.path, got, testCase.want)
+		}
+	}
+}
+
+func TestHomebrewFormulaNameDefault(t *testing.T) {
+	if got := HomebrewFormulaName(); got != DefaultHomebrewFormulaName {
+		t.Fatalf("HomebrewFormulaName() = %q", got)
+	}
+}

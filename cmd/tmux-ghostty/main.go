@@ -145,20 +145,25 @@ func runVersion(args []string) int {
 		return 1
 	}
 	info := buildinfo.Current()
+	currentInstall, _ := install.DetectInstallation()
 	printJSON(struct {
-		Version     string `json:"version"`
-		Commit      string `json:"commit"`
-		BuildDate   string `json:"build_date"`
-		ReleaseRepo string `json:"release_repo"`
-		PackageID   string `json:"package_id"`
-		InstallDir  string `json:"install_dir"`
+		Version            string `json:"version"`
+		Commit             string `json:"commit"`
+		BuildDate          string `json:"build_date"`
+		ReleaseRepo        string `json:"release_repo"`
+		PackageID          string `json:"package_id"`
+		InstallDir         string `json:"install_dir"`
+		CurrentBinary      string `json:"current_binary"`
+		InstallationMethod string `json:"installation_method"`
 	}{
-		Version:     info.Version,
-		Commit:      info.Commit,
-		BuildDate:   info.BuildDate,
-		ReleaseRepo: install.ReleaseRepo(),
-		PackageID:   install.PackageID(),
-		InstallDir:  install.InstallDir(),
+		Version:            info.Version,
+		Commit:             info.Commit,
+		BuildDate:          info.BuildDate,
+		ReleaseRepo:        install.ReleaseRepo(),
+		PackageID:          install.PackageID(),
+		InstallDir:         install.InstallDir(),
+		CurrentBinary:      currentInstall.ResolvedPath,
+		InstallationMethod: string(currentInstall.Method),
 	})
 	return 0
 }
@@ -177,6 +182,9 @@ func runSelfUpdate(ctx context.Context, args []string) int {
 	}
 	if runtime.GOOS != "darwin" {
 		return printError(fmt.Errorf("self-update is only supported on macOS"))
+	}
+	if currentInstall, err := install.DetectInstallation(); err == nil && currentInstall.Method == install.InstallationMethodHomebrew {
+		return printError(fmt.Errorf("self-update is disabled for Homebrew installs; use: brew upgrade %s", install.HomebrewFormulaName()))
 	}
 
 	client := update.NewGitHubClient(install.ReleaseRepo())
@@ -265,6 +273,9 @@ func runUninstall(ctx context.Context, args []string) int {
 	if flags.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "usage: tmux-ghostty uninstall")
 		return 1
+	}
+	if currentInstall, err := install.DetectInstallation(); err == nil && currentInstall.Method == install.InstallationMethodHomebrew {
+		return printError(fmt.Errorf("Homebrew-managed install detected at %s; use: brew uninstall %s", currentInstall.ResolvedPath, install.HomebrewFormulaName()))
 	}
 	if os.Geteuid() != 0 {
 		fmt.Fprintln(os.Stderr, "uninstall requires administrator privileges; run: sudo tmux-ghostty uninstall")

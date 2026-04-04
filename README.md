@@ -59,6 +59,9 @@ For release builds and local packaging:
 ```bash
 make release-binaries VERSION=v0.1.0
 make package VERSION=v0.1.0
+make install-tarball VERSION=v0.1.0
+make homebrew-formula VERSION=v0.1.0
+make publish-homebrew-tap VERSION=v0.1.0
 ```
 
 `make package` creates:
@@ -66,6 +69,7 @@ make package VERSION=v0.1.0
 - `dist/release/<version>/tmux-ghostty_<version>_darwin_universal.tar.gz`
 - `dist/release/<version>/tmux-ghostty_<version>_darwin_universal.pkg`
 - `dist/release/<version>/checksums.txt`
+- `dist/release/<version>/homebrew/Formula/tmux-ghostty.rb`
 
 ## CLI
 
@@ -110,6 +114,72 @@ tmux-ghostty help
 
 ## Install, Update, Uninstall
 
+### Install from tarball
+
+You can install from the release tarball without building or using a `.pkg`:
+
+```bash
+./scripts/install-tarball.sh --version v0.1.0
+```
+
+Or install from a locally built archive:
+
+```bash
+./scripts/install-tarball.sh --archive dist/release/v0.1.0/tmux-ghostty_v0.1.0_darwin_universal.tar.gz
+```
+
+### Install with Homebrew
+
+This repository can generate a ready-to-publish Homebrew formula file:
+
+```bash
+make homebrew-formula VERSION=v0.1.0
+```
+
+The generated file is:
+
+```text
+dist/release/<version>/homebrew/Formula/tmux-ghostty.rb
+```
+
+To actually publish through Homebrew, you still need a separate tap repository that contains:
+
+```text
+Formula/tmux-ghostty.rb
+```
+
+Required extra configuration for Homebrew publishing:
+
+- Create a public tap repo such as `<owner>/homebrew-tmux-ghostty` and initialize its default branch.
+- Add the Actions variable `HOMEBREW_TAP_REPO=<owner>/homebrew-tmux-ghostty` in this repository.
+- Add the Actions secret `HOMEBREW_TAP_TOKEN=<fine-grained PAT>` in this repository. The token only needs `contents:write` on the tap repo.
+
+Optional configuration:
+
+- `HOMEBREW_TAP_BRANCH=main`
+- `HOMEBREW_TAP_FORMULA_PATH=Formula/tmux-ghostty.rb`
+- `TMUX_GHOSTTY_HOMEBREW_FORMULA=tmux-ghostty`
+- `TMUX_GHOSTTY_HOMEBREW_CLASS=TmuxGhostty`
+- `TMUX_GHOSTTY_HOMEBREW_HOMEPAGE=https://github.com/<owner>/<repo>`
+- `TMUX_GHOSTTY_HOMEBREW_DESC=Shared terminal broker for Ghostty powered by tmux`
+
+Once those are set, the existing release workflow can sync the formula into the tap repo automatically after each tag release. For a local/manual publish, run:
+
+```bash
+HOMEBREW_TAP_REPO=<owner>/homebrew-tmux-ghostty \
+HOMEBREW_TAP_TOKEN=<token> \
+make publish-homebrew-tap VERSION=v0.1.0
+```
+
+Once the tap exists, the end-user flow is:
+
+```bash
+brew tap <owner>/tmux-ghostty
+brew install tmux-ghostty
+brew upgrade tmux-ghostty
+brew uninstall tmux-ghostty
+```
+
 The packaged macOS installer places both binaries in:
 
 ```text
@@ -132,6 +202,8 @@ sudo tmux-ghostty uninstall
 - `/usr/local/bin/tmux-ghostty`
 - `/usr/local/bin/tmux-ghostty-broker`
 - `~/Library/Application Support/tmux-ghostty/`
+
+When installed by Homebrew, `tmux-ghostty self-update` and `tmux-ghostty uninstall` are intentionally blocked. Users should use `brew upgrade tmux-ghostty` and `brew uninstall tmux-ghostty` instead.
 
 ## Command Risk Levels
 
@@ -184,7 +256,9 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The workflow builds both binaries for `darwin/amd64` and `darwin/arm64`, merges universal binaries, creates the `.pkg`, notarizes it when Apple signing secrets are configured, and uploads the `.pkg`, `.tar.gz`, and `checksums.txt` to GitHub Release.
+The workflow builds both binaries for `darwin/amd64` and `darwin/arm64`, merges universal binaries, creates the `.pkg`, notarizes it when Apple signing secrets are configured, generates a Homebrew formula file, and uploads the `.pkg`, `.tar.gz`, `checksums.txt`, and formula file to GitHub Release.
+
+If `HOMEBREW_TAP_REPO` and `HOMEBREW_TAP_TOKEN` are configured, the same workflow also commits the generated formula into the tap repository automatically.
 
 ## Notes
 

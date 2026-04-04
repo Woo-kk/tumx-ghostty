@@ -11,6 +11,15 @@ permissions:
 jobs:
   release:
     runs-on: macos-14
+    env:
+      TMUX_GHOSTTY_HOMEBREW_FORMULA: ${{ vars.TMUX_GHOSTTY_HOMEBREW_FORMULA }}
+      TMUX_GHOSTTY_HOMEBREW_FORMULA_FILE: ${{ vars.TMUX_GHOSTTY_HOMEBREW_FORMULA || 'tmux-ghostty' }}
+      TMUX_GHOSTTY_HOMEBREW_CLASS: ${{ vars.TMUX_GHOSTTY_HOMEBREW_CLASS }}
+      TMUX_GHOSTTY_HOMEBREW_HOMEPAGE: ${{ vars.TMUX_GHOSTTY_HOMEBREW_HOMEPAGE }}
+      TMUX_GHOSTTY_HOMEBREW_DESC: ${{ vars.TMUX_GHOSTTY_HOMEBREW_DESC }}
+      HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+      HOMEBREW_TAP_BRANCH: ${{ vars.HOMEBREW_TAP_BRANCH }}
+      HOMEBREW_TAP_FORMULA_PATH: ${{ vars.HOMEBREW_TAP_FORMULA_PATH }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,6 +61,11 @@ jobs:
           REQUIRE_NOTARIZATION: "1"
         run: ./scripts/build-pkg.sh "${GITHUB_REF_NAME}"
 
+      - name: Generate Homebrew formula
+        env:
+          TMUX_GHOSTTY_RELEASE_REPO: ${{ github.repository }}
+        run: ./scripts/build-homebrew-formula.sh "${GITHUB_REF_NAME}"
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -59,3 +73,14 @@ jobs:
             dist/release/${{ github.ref_name }}/tmux-ghostty_${{ github.ref_name }}_darwin_universal.pkg
             dist/release/${{ github.ref_name }}/tmux-ghostty_${{ github.ref_name }}_darwin_universal.tar.gz
             dist/release/${{ github.ref_name }}/checksums.txt
+            dist/release/${{ github.ref_name }}/homebrew/Formula/${{ env.TMUX_GHOSTTY_HOMEBREW_FORMULA_FILE }}.rb
+
+      - name: Publish Homebrew tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [[ -z "${HOMEBREW_TAP_REPO}" || -z "${HOMEBREW_TAP_TOKEN}" ]]; then
+            echo "Homebrew tap publish not configured; skipping."
+            exit 0
+          fi
+          ./scripts/publish-homebrew-tap.sh "${GITHUB_REF_NAME}"
