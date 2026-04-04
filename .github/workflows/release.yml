@@ -34,7 +34,40 @@ jobs:
       - name: Make scripts executable
         run: chmod +x scripts/*.sh
 
+      - name: Resolve release mode
+        id: release_mode
+        env:
+          APP_CERT: ${{ secrets.APPLE_DEVELOPER_ID_APP_CERT_P12_BASE64 }}
+          APP_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_APP_SIGNING_IDENTITY }}
+          INSTALLER_CERT: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_CERT_P12_BASE64 }}
+          INSTALLER_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_SIGNING_IDENTITY }}
+          NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
+          NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
+        run: |
+          signing=0
+          if [[ -n "${APP_CERT}" && -n "${APP_IDENTITY}" && -n "${INSTALLER_CERT}" && -n "${INSTALLER_IDENTITY}" ]]; then
+            signing=1
+          fi
+          notarization=0
+          if [[ "$signing" == "1" && -n "${NOTARY_APPLE_ID}" && -n "${NOTARY_PASSWORD}" && -n "${NOTARY_TEAM_ID}" ]]; then
+            notarization=1
+          fi
+          echo "signing=${signing}" >> "$GITHUB_OUTPUT"
+          echo "notarization=${notarization}" >> "$GITHUB_OUTPUT"
+          if [[ "$signing" == "1" ]]; then
+            echo "Release mode: signed"
+          else
+            echo "Release mode: unsigned"
+          fi
+          if [[ "$notarization" == "1" ]]; then
+            echo "Notarization: enabled"
+          else
+            echo "Notarization: disabled"
+          fi
+
       - name: Import Apple signing certificates
+        if: ${{ steps.release_mode.outputs.signing == '1' }}
         env:
           APPLE_DEVELOPER_ID_APP_CERT_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APP_CERT_P12_BASE64 }}
           APPLE_DEVELOPER_ID_APP_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APP_CERT_PASSWORD }}
@@ -47,7 +80,7 @@ jobs:
           TMUX_GHOSTTY_RELEASE_REPO: ${{ github.repository }}
           TMUX_GHOSTTY_PACKAGE_ID: com.guyuanshun.tmux-ghostty
           APPLE_DEVELOPER_ID_APP_SIGNING_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_APP_SIGNING_IDENTITY }}
-          REQUIRE_SIGNING: "1"
+          REQUIRE_SIGNING: ${{ steps.release_mode.outputs.signing }}
         run: ./scripts/build-release.sh "${GITHUB_REF_NAME}"
 
       - name: Build signed and notarized pkg
@@ -57,8 +90,8 @@ jobs:
           APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
           APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
           APPLE_NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
-          REQUIRE_SIGNING: "1"
-          REQUIRE_NOTARIZATION: "1"
+          REQUIRE_SIGNING: ${{ steps.release_mode.outputs.signing }}
+          REQUIRE_NOTARIZATION: ${{ steps.release_mode.outputs.notarization }}
         run: ./scripts/build-pkg.sh "${GITHUB_REF_NAME}"
 
       - name: Generate Homebrew formula
