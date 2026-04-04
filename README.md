@@ -150,8 +150,7 @@ Formula/tmux-ghostty.rb
 
 Required extra configuration for Homebrew publishing:
 
-- Create a public tap repo such as `<owner>/homebrew-tmux-ghostty` and initialize its default branch.
-- Add the Actions variable `HOMEBREW_TAP_REPO=<owner>/homebrew-tmux-ghostty` in this repository.
+- The public tap repo is `Woo-kk/homebrew-tmux-ghostty`.
 - Add the Actions secret `HOMEBREW_TAP_TOKEN=<fine-grained PAT>` in this repository. The token only needs `contents:write` on the tap repo.
 
 Optional configuration:
@@ -160,13 +159,13 @@ Optional configuration:
 - `HOMEBREW_TAP_FORMULA_PATH=Formula/tmux-ghostty.rb`
 - `TMUX_GHOSTTY_HOMEBREW_FORMULA=tmux-ghostty`
 - `TMUX_GHOSTTY_HOMEBREW_CLASS=TmuxGhostty`
-- `TMUX_GHOSTTY_HOMEBREW_HOMEPAGE=https://github.com/<owner>/<repo>`
+- `TMUX_GHOSTTY_HOMEBREW_HOMEPAGE=https://github.com/Woo-kk/tumx-ghostty`
 - `TMUX_GHOSTTY_HOMEBREW_DESC=Shared terminal broker for Ghostty powered by tmux`
 
 Once those are set, the existing release workflow can sync the formula into the tap repo automatically after each tag release. For a local/manual publish, run:
 
 ```bash
-HOMEBREW_TAP_REPO=<owner>/homebrew-tmux-ghostty \
+HOMEBREW_TAP_REPO=Woo-kk/homebrew-tmux-ghostty \
 HOMEBREW_TAP_TOKEN=<token> \
 make publish-homebrew-tap VERSION=v0.1.0
 ```
@@ -174,7 +173,7 @@ make publish-homebrew-tap VERSION=v0.1.0
 Once the tap exists, the end-user flow is:
 
 ```bash
-brew tap <owner>/tmux-ghostty
+brew tap Woo-kk/tmux-ghostty
 brew install tmux-ghostty
 brew upgrade tmux-ghostty
 brew uninstall tmux-ghostty
@@ -258,7 +257,7 @@ git push origin v0.1.0
 
 The workflow builds both binaries for `darwin/amd64` and `darwin/arm64`, merges universal binaries, creates the `.pkg`, notarizes it when Apple signing secrets are configured, generates a Homebrew formula file, and uploads the `.pkg`, `.tar.gz`, `checksums.txt`, and formula file to GitHub Release.
 
-If `HOMEBREW_TAP_REPO` and `HOMEBREW_TAP_TOKEN` are configured, the same workflow also commits the generated formula into the tap repository automatically.
+If `HOMEBREW_TAP_TOKEN` is configured, the same workflow also commits the generated formula into `Woo-kk/homebrew-tmux-ghostty` automatically.
 
 ## Notes
 

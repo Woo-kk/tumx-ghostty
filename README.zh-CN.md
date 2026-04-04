@@ -150,8 +150,7 @@ Formula/tmux-ghostty.rb
 
 Homebrew 发布需要额外配置这些内容：
 
-- 创建一个公开 tap 仓库，例如 `<owner>/homebrew-tmux-ghostty`，并先初始化默认分支。
-- 在当前仓库里添加 Actions 变量：`HOMEBREW_TAP_REPO=<owner>/homebrew-tmux-ghostty`
+- 公开 tap 仓库已经固定为 `Woo-kk/homebrew-tmux-ghostty`
 - 在当前仓库里添加 Actions secret：`HOMEBREW_TAP_TOKEN=<fine-grained PAT>`。这个 token 只需要对 tap 仓库有 `contents:write` 权限。
 
 可选配置：
@@ -160,13 +159,13 @@ Homebrew 发布需要额外配置这些内容：
 - `HOMEBREW_TAP_FORMULA_PATH=Formula/tmux-ghostty.rb`
 - `TMUX_GHOSTTY_HOMEBREW_FORMULA=tmux-ghostty`
 - `TMUX_GHOSTTY_HOMEBREW_CLASS=TmuxGhostty`
-- `TMUX_GHOSTTY_HOMEBREW_HOMEPAGE=https://github.com/<owner>/<repo>`
+- `TMUX_GHOSTTY_HOMEBREW_HOMEPAGE=https://github.com/Woo-kk/tumx-ghostty`
 - `TMUX_GHOSTTY_HOMEBREW_DESC=Shared terminal broker for Ghostty powered by tmux`
 
 这些配好后，现有的 release workflow 会在每次打 tag 发布后，自动把生成出的 formula 同步到 tap 仓库。若你要在本地手动推送，可以执行：
 
 ```bash
-HOMEBREW_TAP_REPO=<owner>/homebrew-tmux-ghostty \
+HOMEBREW_TAP_REPO=Woo-kk/homebrew-tmux-ghostty \
 HOMEBREW_TAP_TOKEN=<token> \
 make publish-homebrew-tap VERSION=v0.1.0
 ```
@@ -174,7 +173,7 @@ make publish-homebrew-tap VERSION=v0.1.0
 tap 准备好之后，终端用户的使用方式是：
 
 ```bash
-brew tap <owner>/tmux-ghostty
+brew tap Woo-kk/tmux-ghostty
 brew install tmux-ghostty
 brew upgrade tmux-ghostty
 brew uninstall tmux-ghostty
@@ -258,7 +257,7 @@ git push origin v0.1.0
 
 这个 workflow 会分别构建 `darwin/amd64` 和 `darwin/arm64` 的两个二进制，合并 universal binary，生成 `.pkg`，在 Apple 签名 secrets 配好时执行公证，额外生成 Homebrew formula 文件，并把 `.pkg`、`.tar.gz`、`checksums.txt` 和 formula 文件一起上传到 GitHub Release。
 
-如果你已经配置了 `HOMEBREW_TAP_REPO` 和 `HOMEBREW_TAP_TOKEN`，同一个 workflow 还会自动把 formula 提交到 tap 仓库。
+如果你已经配置了 `HOMEBREW_TAP_TOKEN`，同一个 workflow 还会自动把 formula 提交到 `Woo-kk/homebrew-tmux-ghostty`。
 
 ## 说明
 
