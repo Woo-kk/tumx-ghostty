@@ -39,6 +39,10 @@ internal/
   tmux/
 ```
 
+## Codex Skill
+
+This repository includes a repo-local Codex skill at `skills/tmux-ghostty/SKILL.md`. Use it when Codex should operate `tmux-ghostty` as the primary shared Ghostty/tmux control surface.
+
 ## Build and Test
 
 Use the following commands to run tests and build the binaries.
@@ -108,7 +112,7 @@ tmux-ghostty command send <pane-id> <command...>
 tmux-ghostty help
 ```
 
-`tmux-ghostty help` prints the full command list. `tmux-ghostty -h` and `tmux-ghostty --help` are equivalent aliases.
+`tmux-ghostty help` is the authoritative detailed command reference. The README keeps the high-level command tree; use the CLI for the per-command descriptions. `tmux-ghostty -h` and `tmux-ghostty --help` are equivalent aliases.
 
 `tmux-ghostty version` prints build metadata. `tmux-ghostty self-update` installs a GitHub Release package over the current installation. `tmux-ghostty uninstall` removes both installed binaries and the current user's runtime data.
 
@@ -187,6 +191,8 @@ If you want to install the locally built binaries into `/usr/local/bin`:
 sudo install -m 0755 ./tmux-ghostty /usr/local/bin/tmux-ghostty
 sudo install -m 0755 ./tmux-ghostty-broker /usr/local/bin/tmux-ghostty-broker
 ```
+
+## Maintainer Publishing
 
 ### Publish with Homebrew
 

@@ -27,7 +27,7 @@ func TestRunHelpOutputsUsageToStdout(t *testing.T) {
 			if stderr != "" {
 				t.Fatalf("expected no stderr for %v, got %q", args, stderr)
 			}
-			if stdout != helpText+"\n" {
+			if stdout != helpText()+"\n" {
 				t.Fatalf("unexpected stdout for %v: %q", args, stdout)
 			}
 		})
@@ -42,7 +42,7 @@ func TestRunNoArgsOutputsUsageToStderr(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("expected no stdout, got %q", stdout)
 	}
-	if stderr != usageText+"\n" {
+	if stderr != usageText()+"\n" {
 		t.Fatalf("unexpected stderr: %q", stderr)
 	}
 }
@@ -55,8 +55,29 @@ func TestRunUnknownCommandOutputsUsageToStderr(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("expected no stdout, got %q", stdout)
 	}
-	if stderr != usageText+"\n" {
+	if stderr != usageText()+"\n" {
 		t.Fatalf("unexpected stderr: %q", stderr)
+	}
+}
+
+func TestHelpTextIncludesCommandGroupsAndKeyCommands(t *testing.T) {
+	output := helpText()
+	for _, fragment := range []string{
+		"Lifecycle:",
+		"Broker:",
+		"Workspace:",
+		"Pane:",
+		"Host:",
+		"Control:",
+		"Approvals:",
+		"Commands:",
+		"tmux-ghostty workspace create",
+		"tmux-ghostty command send <pane-id> <command...>",
+		"Notes:",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("help text missing %q", fragment)
+		}
 	}
 }
 

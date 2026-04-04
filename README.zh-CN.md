@@ -39,6 +39,10 @@ internal/
   tmux/
 ```
 
+## Codex 适配 Skill
+
+这个仓库内置了一个 repo-local Codex skill，位于 `skills/tmux-ghostty/SKILL.md`。当 Codex 需要把 `tmux-ghostty` 当作主要的 Ghostty/tmux 共享控制面来操作时，应优先使用它。
+
 ## 构建与测试
 
 使用下面的命令运行测试并构建二进制。
@@ -108,7 +112,7 @@ tmux-ghostty command send <pane-id> <command...>
 tmux-ghostty help
 ```
 
-`tmux-ghostty help` 会输出完整命令列表。`tmux-ghostty -h` 和 `tmux-ghostty --help` 是等价别名。
+`tmux-ghostty help` 是权威的详细命令参考。README 只保留高层级命令树，具体命令说明请以 CLI 输出为准。`tmux-ghostty -h` 和 `tmux-ghostty --help` 是等价别名。
 
 `tmux-ghostty version` 会输出构建元信息。`tmux-ghostty self-update` 会用 GitHub Release 中的安装包覆盖当前安装。`tmux-ghostty uninstall` 会同时删除两个已安装二进制和当前用户的运行时数据。
 
@@ -187,6 +191,8 @@ go build ./cmd/tmux-ghostty-broker
 sudo install -m 0755 ./tmux-ghostty /usr/local/bin/tmux-ghostty
 sudo install -m 0755 ./tmux-ghostty-broker /usr/local/bin/tmux-ghostty-broker
 ```
+
+## 维护者发布
 
 ### 用 Homebrew 发布
 
