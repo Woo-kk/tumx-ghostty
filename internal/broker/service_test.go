@@ -26,10 +26,25 @@ type fakeGhosttyClient struct {
 	tabCounter      int
 	terminalCounter int
 	splitErr        error
+	inputTextHook   func(string, string) error
+	sendKeyHook     func(string, string, []string) error
+	inputTexts      []fakeGhosttyInput
+	sendKeyCalls    []fakeGhosttyKey
 	windows         map[string]ghostty.WindowRef
 	tabs            map[string][]ghostty.TabRef
 	terminals       map[string][]ghostty.TerminalRef
 	focus           ghostty.FocusContext
+}
+
+type fakeGhosttyInput struct {
+	terminalID string
+	text       string
+}
+
+type fakeGhosttyKey struct {
+	terminalID string
+	key        string
+	modifiers  []string
 }
 
 type fakeJumpClient struct{}
@@ -42,11 +57,35 @@ func newFakeGhosttyClient() *fakeGhosttyClient {
 	}
 }
 
-func (f *fakeGhosttyClient) Available() error                       { return nil }
-func (f *fakeGhosttyClient) EnsureRunning() error                   { return nil }
-func (f *fakeGhosttyClient) FocusTerminal(string) error             { return nil }
-func (f *fakeGhosttyClient) InputText(string, string) error         { return nil }
-func (f *fakeGhosttyClient) SendKey(string, string, []string) error { return nil }
+func (f *fakeGhosttyClient) Available() error     { return nil }
+func (f *fakeGhosttyClient) EnsureRunning() error { return nil }
+func (f *fakeGhosttyClient) FocusTerminal(string) error {
+	return nil
+}
+func (f *fakeGhosttyClient) InputText(terminalID string, text string) error {
+	f.mu.Lock()
+	f.inputTexts = append(f.inputTexts, fakeGhosttyInput{terminalID: terminalID, text: text})
+	hook := f.inputTextHook
+	f.mu.Unlock()
+	if hook != nil {
+		return hook(terminalID, text)
+	}
+	return nil
+}
+func (f *fakeGhosttyClient) SendKey(terminalID string, key string, modifiers []string) error {
+	f.mu.Lock()
+	f.sendKeyCalls = append(f.sendKeyCalls, fakeGhosttyKey{
+		terminalID: terminalID,
+		key:        key,
+		modifiers:  append([]string(nil), modifiers...),
+	})
+	hook := f.sendKeyHook
+	f.mu.Unlock()
+	if hook != nil {
+		return hook(terminalID, key, modifiers)
+	}
+	return nil
+}
 func (f *fakeGhosttyClient) InspectFocused() (ghostty.FocusContext, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -339,6 +378,61 @@ func TestAdoptCurrentFailsWhenCurrentTerminalAlreadyManaged(t *testing.T) {
 	}
 	if _, err := service.AdoptCurrent(); err == nil {
 		t.Fatalf("expected adopt current to fail for a managed terminal")
+	}
+}
+
+func TestProbeCurrentTerminalUsesShortTempScript(t *testing.T) {
+	service := newTestService(t)
+	fakeGhostty := service.ghostty.(*fakeGhosttyClient)
+
+	var typedCommand string
+	fakeGhostty.inputTextHook = func(_ string, text string) error {
+		typedCommand = text
+		return nil
+	}
+	fakeGhostty.sendKeyHook = func(_ string, key string, _ []string) error {
+		if key != "enter" {
+			return fmt.Errorf("unexpected key: %s", key)
+		}
+		scriptPath := strings.TrimSpace(typedCommand)
+		script, err := os.ReadFile(scriptPath)
+		if err != nil {
+			return fmt.Errorf("read probe script: %w", err)
+		}
+		if !strings.Contains(string(script), "tmux display-message") {
+			return fmt.Errorf("probe script did not include tmux probe")
+		}
+		probePath := strings.TrimSuffix(scriptPath, ".sh") + ".json"
+		return os.WriteFile(probePath, []byte(`{"inside_tmux":true,"tmux_session":"local-test","tmux_pane":"local-test:0.0"}`), 0o600)
+	}
+
+	probe, err := service.probeCurrentTerminal("terminal-test")
+	if err != nil {
+		t.Fatalf("probe current terminal: %v", err)
+	}
+	if !probe.InsideTmux {
+		t.Fatalf("expected probe to report tmux")
+	}
+	if probe.TmuxSession != "local-test" {
+		t.Fatalf("unexpected tmux session: %q", probe.TmuxSession)
+	}
+	if probe.TmuxPane != "local-test:0.0" {
+		t.Fatalf("unexpected tmux pane: %q", probe.TmuxPane)
+	}
+	if !strings.HasPrefix(typedCommand, " /tmp/tmux-ghostty-probe-") {
+		t.Fatalf("expected short temp script command, got %q", typedCommand)
+	}
+	if strings.Contains(typedCommand, "tmux display-message") || strings.Contains(typedCommand, "inside_tmux") {
+		t.Fatalf("expected injected command to hide inline probe shell, got %q", typedCommand)
+	}
+
+	scriptPath := strings.TrimSpace(typedCommand)
+	if _, err := os.Stat(scriptPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected probe script to be cleaned up, stat err=%v", err)
+	}
+	probePath := strings.TrimSuffix(scriptPath, ".sh") + ".json"
+	if _, err := os.Stat(probePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected probe json to be cleaned up, stat err=%v", err)
 	}
 }
 

@@ -1184,9 +1184,28 @@ func (s *Service) updateWorkspaceStatusLocked(workspaceID string) {
 }
 
 func (s *Service) probeCurrentTerminal(terminalID string) (currentTerminalProbe, error) {
-	probePath := filepath.Join(os.TempDir(), fmt.Sprintf("tmux-ghostty-probe-%d.json", time.Now().UnixNano()))
+	probeID := fmt.Sprintf("%d", time.Now().UnixNano())
+	probePath := filepath.Join("/tmp", "tmux-ghostty-probe-"+probeID+".json")
+	scriptPath := filepath.Join("/tmp", "tmux-ghostty-probe-"+probeID+".sh")
 	_ = os.Remove(probePath)
-	command := `{ if [ -n "$TMUX" ]; then tmux display-message -p '{"inside_tmux":true,"tmux_session":"#{session_name}","tmux_pane":"#{pane_id}"}'; else printf '%s\n' '{"inside_tmux":false}'; fi; } > ` + execx.ShellQuote(probePath)
+	_ = os.Remove(scriptPath)
+	defer os.Remove(probePath)
+	defer os.Remove(scriptPath)
+
+	script := `#!/bin/sh
+set -eu
+if [ -n "${TMUX:-}" ]; then
+  tmux display-message -p '{"inside_tmux":true,"tmux_session":"#{session_name}","tmux_pane":"#{pane_id}"}' > ` + execx.ShellQuote(probePath) + `
+else
+  printf '%s\n' '{"inside_tmux":false}' > ` + execx.ShellQuote(probePath) + `
+fi
+printf '\033[1A\033[2K\r' > /dev/tty 2>/dev/null || true
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
+		return currentTerminalProbe{}, fmt.Errorf("failed to prepare current terminal tmux probe: %w", err)
+	}
+
+	command := " " + execx.ShellQuote(scriptPath)
 	if err := s.ghostty.InputText(terminalID, command); err != nil {
 		return currentTerminalProbe{}, fmt.Errorf("failed to send tmux probe to current terminal: %w", err)
 	}
@@ -1198,7 +1217,6 @@ func (s *Service) probeCurrentTerminal(terminalID string) (currentTerminalProbe,
 	for time.Now().Before(deadline) {
 		buf, err := os.ReadFile(probePath)
 		if err == nil {
-			_ = os.Remove(probePath)
 			var probe currentTerminalProbe
 			if err := json.Unmarshal(buf, &probe); err != nil {
 				return currentTerminalProbe{}, fmt.Errorf("current terminal returned an unreadable tmux probe result: %w", err)
