@@ -39,9 +39,9 @@ internal/
   tmux/
 ```
 
-## Codex Skill
+## Agent Runbook
 
-This repository includes a repo-local Codex skill at `skills/tmux-ghostty/SKILL.md`. Use it when Codex should operate `tmux-ghostty` as the primary shared Ghostty/tmux control surface.
+This repository includes a repo-local agent runbook at `skills/tmux-ghostty/SKILL.md`. It is written in a vendor-neutral format so different local coding agents can reuse the same workflow. `CLAUDE.md` points Claude Code to the same file.
 
 ## Build and Test
 
@@ -190,50 +190,6 @@ If you want to install the locally built binaries into `/usr/local/bin`:
 ```bash
 sudo install -m 0755 ./tmux-ghostty /usr/local/bin/tmux-ghostty
 sudo install -m 0755 ./tmux-ghostty-broker /usr/local/bin/tmux-ghostty-broker
-```
-
-## Maintainer Publishing
-
-### Publish with Homebrew
-
-This repository can generate a ready-to-publish Homebrew formula file:
-
-```bash
-make homebrew-formula VERSION=v0.1.0
-```
-
-The generated file is:
-
-```text
-dist/release/<version>/homebrew/Formula/tmux-ghostty.rb
-```
-
-To actually publish through Homebrew, you still need a separate tap repository that contains:
-
-```text
-Formula/tmux-ghostty.rb
-```
-
-Required extra configuration for Homebrew publishing:
-
-- The public tap repo is `Woo-kk/homebrew-tmux-ghostty`.
-- Add the Actions secret `HOMEBREW_TAP_TOKEN=<fine-grained PAT>` in this repository. The token only needs `contents:write` on the tap repo.
-
-Optional configuration:
-
-- `HOMEBREW_TAP_BRANCH=main`
-- `HOMEBREW_TAP_FORMULA_PATH=Formula/tmux-ghostty.rb`
-- `TMUX_GHOSTTY_HOMEBREW_FORMULA=tmux-ghostty`
-- `TMUX_GHOSTTY_HOMEBREW_CLASS=TmuxGhostty`
-- `TMUX_GHOSTTY_HOMEBREW_HOMEPAGE=https://github.com/Woo-kk/tmux-ghostty`
-- `TMUX_GHOSTTY_HOMEBREW_DESC=Shared terminal broker for Ghostty powered by tmux`
-
-Once those are set, the existing release workflow can sync the formula into the tap repo automatically after each tag release. For a local/manual publish, run:
-
-```bash
-HOMEBREW_TAP_REPO=Woo-kk/homebrew-tmux-ghostty \
-HOMEBREW_TAP_TOKEN=<token> \
-make publish-homebrew-tap VERSION=v0.1.0
 ```
 
 `tmux-ghostty uninstall` removes:

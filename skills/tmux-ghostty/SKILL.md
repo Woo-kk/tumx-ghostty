@@ -5,11 +5,13 @@ description: Use tmux-ghostty to manage local Ghostty/tmux workspaces, panes, co
 
 # Tmux Ghostty
 
-Use this skill when Codex should operate the local `tmux-ghostty` CLI instead of manipulating Ghostty or tmux state ad hoc.
+Use this runbook when an agent should operate the local `tmux-ghostty` CLI instead of manipulating Ghostty or tmux state ad hoc.
+
+This file is intentionally vendor-neutral. It should be usable from any local coding agent that can read repository files and run local shell commands, including Claude Code.
 
 ## User Help
 
-If the user selects this skill and then says `help`, return a short Chinese usage note.
+If the active agent is using this runbook and the user says `help`, return a short Chinese usage note.
 
 Do not dump internal package names, JSON-RPC method names, or repository implementation details unless the user explicitly asks for them.
 
@@ -78,7 +80,7 @@ Keep that response concise and task-oriented.
 
 ### 5. Control handoff
 
-- Use `tmux-ghostty claim <pane-id> --actor agent` when Codex should actively drive the pane.
+- Use `tmux-ghostty claim <pane-id> --actor agent` when the agent should actively drive the pane.
 - Use `tmux-ghostty claim <pane-id> --actor user` when the user should take over explicitly.
 - Use `tmux-ghostty release <pane-id>` to clear control ownership.
 - Use `tmux-ghostty observe <pane-id>` when the pane should remain read-only from the agent side.
@@ -108,6 +110,7 @@ Keep that response concise and task-oriented.
 - Do not bypass the approval flow for risky commands.
 - Use `pane snapshot` before and after important transitions when you need verifiable terminal state.
 - When a request is purely about CLI syntax or command discovery, answer from `tmux-ghostty help` behavior rather than internal package structure.
+- If the agent runtime does not auto-load `skills/`, open this file manually or point the runtime's repo instructions to it.
 
 ## Example Requests
 

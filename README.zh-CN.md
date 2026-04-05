@@ -39,9 +39,9 @@ internal/
   tmux/
 ```
 
-## Codex 适配 Skill
+## Agent Runbook
 
-这个仓库内置了一个 repo-local Codex skill，位于 `skills/tmux-ghostty/SKILL.md`。当 Codex 需要把 `tmux-ghostty` 当作主要的 Ghostty/tmux 共享控制面来操作时，应优先使用它。
+这个仓库内置了一份 repo-local agent runbook，位于 `skills/tmux-ghostty/SKILL.md`。它使用中性的工作流写法，便于不同的本地 coding agent 复用；根目录下的 `CLAUDE.md` 也会把 Claude Code 指向同一份文件。
 
 ## 构建与测试
 
@@ -190,50 +190,6 @@ go build ./cmd/tmux-ghostty-broker
 ```bash
 sudo install -m 0755 ./tmux-ghostty /usr/local/bin/tmux-ghostty
 sudo install -m 0755 ./tmux-ghostty-broker /usr/local/bin/tmux-ghostty-broker
-```
-
-## 维护者发布
-
-### 用 Homebrew 发布
-
-这个仓库现在可以生成一个可发布的 Homebrew formula 文件：
-
-```bash
-make homebrew-formula VERSION=v0.1.0
-```
-
-生成结果位于：
-
-```text
-dist/release/<version>/homebrew/Formula/tmux-ghostty.rb
-```
-
-但要真正通过 Homebrew 发布，你仍然需要一个单独的 tap 仓库，并在其中放置：
-
-```text
-Formula/tmux-ghostty.rb
-```
-
-Homebrew 发布需要额外配置这些内容：
-
-- 公开 tap 仓库已经固定为 `Woo-kk/homebrew-tmux-ghostty`
-- 在当前仓库里添加 Actions secret：`HOMEBREW_TAP_TOKEN=<fine-grained PAT>`。这个 token 只需要对 tap 仓库有 `contents:write` 权限。
-
-可选配置：
-
-- `HOMEBREW_TAP_BRANCH=main`
-- `HOMEBREW_TAP_FORMULA_PATH=Formula/tmux-ghostty.rb`
-- `TMUX_GHOSTTY_HOMEBREW_FORMULA=tmux-ghostty`
-- `TMUX_GHOSTTY_HOMEBREW_CLASS=TmuxGhostty`
-- `TMUX_GHOSTTY_HOMEBREW_HOMEPAGE=https://github.com/Woo-kk/tmux-ghostty`
-- `TMUX_GHOSTTY_HOMEBREW_DESC=Shared terminal broker for Ghostty powered by tmux`
-
-这些配好后，现有的 release workflow 会在每次打 tag 发布后，自动把生成出的 formula 同步到 tap 仓库。若你要在本地手动推送，可以执行：
-
-```bash
-HOMEBREW_TAP_REPO=Woo-kk/homebrew-tmux-ghostty \
-HOMEBREW_TAP_TOKEN=<token> \
-make publish-homebrew-tap VERSION=v0.1.0
 ```
 
 `tmux-ghostty uninstall` 会删除：
