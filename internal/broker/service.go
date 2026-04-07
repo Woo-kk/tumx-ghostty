@@ -42,6 +42,8 @@ type TmuxClient interface {
 	HasSession(name string) (bool, error)
 	NewSession(name string) error
 	KillSession(name string) error
+	SplitPane(target string, direction string) (string, error)
+	SelectPane(target string) error
 	SendKeys(target string, text string) error
 	SendCtrlC(target string) error
 	CapturePane(target string, lines int) (string, error)
@@ -561,6 +563,9 @@ func (s *Service) FocusPane(paneID string) error {
 	if err := s.ghostty.FocusTerminal(pane.GhosttyTerminalID); err != nil {
 		return newError(rpc.ReasonGhosttyUnavailable, err)
 	}
+	if err := s.tmux.SelectPane(pane.LocalTmuxTarget); err != nil {
+		return newError(rpc.ReasonTmuxUnavailable, err)
+	}
 	return s.saveLocked()
 }
 
@@ -596,9 +601,14 @@ func (s *Service) SplitPane(paneID string, direction string, claim string) (mode
 	if !ok {
 		return model.Pane{}, newError(rpc.ReasonInvalidState, fmt.Errorf("workspace not found: %s", anchorPane.WorkspaceID))
 	}
+	if s.workspaceUsesLegacyGhosttySplitsLocked(workspace) {
+		return model.Pane{}, newError(rpc.ReasonInvalidState, fmt.Errorf("workspace %s uses the legacy ghostty-split pane layout; close and recreate the workspace to use tmux-native pane split", workspace.ID))
+	}
 
 	newPane := model.NewPane(anchorPane.WorkspaceID)
-	newPane.OwnsLocalTmux = true
+	newPane.GhosttyTerminalID = anchorPane.GhosttyTerminalID
+	newPane.LocalTmuxSession = anchorPane.LocalTmuxSession
+	newPane.OwnsLocalTmux = false
 	if claimValue := strings.TrimSpace(claim); claimValue != "" {
 		controller := model.Controller(strings.ToLower(claimValue))
 		if controller != model.ControllerAgent && controller != model.ControllerUser {
@@ -607,17 +617,11 @@ func (s *Service) SplitPane(paneID string, direction string, claim string) (mode
 		newPane.Controller = controller
 	}
 
-	if err := s.tmux.NewSession(newPane.LocalTmuxSession); err != nil {
+	newTarget, err := s.tmux.SplitPane(anchorPane.LocalTmuxTarget, direction)
+	if err != nil {
 		return model.Pane{}, newError(rpc.ReasonTmuxUnavailable, err)
 	}
-
-	terminalRef, err := s.ghostty.SplitTerminal(anchorPane.GhosttyTerminalID, direction, s.launchCommandForPane(newPane))
-	if err != nil {
-		_ = s.tmux.KillSession(newPane.LocalTmuxSession)
-		return model.Pane{}, newError(rpc.ReasonGhosttyUnavailable, err)
-	}
-
-	newPane.GhosttyTerminalID = terminalRef.ID
+	newPane.LocalTmuxTarget = newTarget
 	workspace.PaneIDs = append(workspace.PaneIDs, newPane.ID)
 
 	s.state.Workspaces[workspace.ID] = workspace
@@ -626,14 +630,12 @@ func (s *Service) SplitPane(paneID string, direction string, claim string) (mode
 		delete(s.state.Panes, newPane.ID)
 		workspace.PaneIDs = workspace.PaneIDs[:len(workspace.PaneIDs)-1]
 		s.state.Workspaces[workspace.ID] = workspace
-		_ = s.tmux.KillSession(newPane.LocalTmuxSession)
 		return model.Pane{}, err
 	}
 	if err := s.saveLocked(); err != nil {
 		delete(s.state.Panes, newPane.ID)
 		workspace.PaneIDs = workspace.PaneIDs[:len(workspace.PaneIDs)-1]
 		s.state.Workspaces[workspace.ID] = workspace
-		_ = s.tmux.KillSession(newPane.LocalTmuxSession)
 		return model.Pane{}, err
 	}
 	return s.state.Panes[newPane.ID], nil
@@ -1000,7 +1002,13 @@ func (s *Service) rebuildWorkspaceLocked(workspaceID string) (model.Workspace, e
 	if len(workspace.PaneIDs) == 0 {
 		return workspace, nil
 	}
+	if s.workspaceUsesLegacyGhosttySplitsLocked(workspace) {
+		return s.rebuildLegacyGhosttyWorkspaceLocked(workspace)
+	}
+	return s.rebuildTmuxNativeWorkspaceLocked(workspace)
+}
 
+func (s *Service) rebuildLegacyGhosttyWorkspaceLocked(workspace model.Workspace) (model.Workspace, error) {
 	firstPane := s.state.Panes[workspace.PaneIDs[0]]
 	if alive, _ := s.tmux.TargetAlive(firstPane.LocalTmuxTarget); !alive {
 		if firstPane.OwnsLocalTmux {
@@ -1051,6 +1059,87 @@ func (s *Service) rebuildWorkspaceLocked(workspaceID string) (model.Workspace, e
 	workspace.Status = model.WorkspaceActive
 	s.state.Workspaces[workspace.ID] = workspace
 	return workspace, nil
+}
+
+func (s *Service) rebuildTmuxNativeWorkspaceLocked(workspace model.Workspace) (model.Workspace, error) {
+	firstPane := s.state.Panes[workspace.PaneIDs[0]]
+	sessionAlive, err := s.tmux.HasSession(firstPane.LocalTmuxSession)
+	if err != nil {
+		return model.Workspace{}, newError(rpc.ReasonTmuxUnavailable, err)
+	}
+
+	if !sessionAlive {
+		if !firstPane.OwnsLocalTmux {
+			return model.Workspace{}, newError(rpc.ReasonInvalidState, fmt.Errorf("pane %s no longer has a live tmux session", firstPane.ID))
+		}
+		if err := s.tmux.NewSession(firstPane.LocalTmuxSession); err != nil {
+			return model.Workspace{}, newError(rpc.ReasonTmuxUnavailable, err)
+		}
+		firstPane.LocalTmuxTarget = firstPane.LocalTmuxSession + ":0.0"
+		s.state.Panes[firstPane.ID] = firstPane
+
+		anchorTarget := firstPane.LocalTmuxTarget
+		directions := []string{"right", "down", "right", "down"}
+		for index, paneID := range workspace.PaneIDs[1:] {
+			pane := s.state.Panes[paneID]
+			newTarget, err := s.tmux.SplitPane(anchorTarget, directions[index%len(directions)])
+			if err != nil {
+				return model.Workspace{}, newError(rpc.ReasonTmuxUnavailable, err)
+			}
+			pane.LocalTmuxSession = firstPane.LocalTmuxSession
+			pane.LocalTmuxTarget = newTarget
+			pane.OwnsLocalTmux = false
+			s.state.Panes[pane.ID] = pane
+		}
+	} else if alive, _ := s.tmux.TargetAlive(firstPane.LocalTmuxTarget); !alive {
+		firstPane.LocalTmuxTarget = firstPane.LocalTmuxSession + ":0.0"
+		s.state.Panes[firstPane.ID] = firstPane
+	}
+
+	windowRef, terminalRef, err := s.ghostty.NewWindow(s.launchCommandForPane(firstPane))
+	if err != nil {
+		return model.Workspace{}, newError(rpc.ReasonGhosttyUnavailable, err)
+	}
+	workspace.GhosttyWindowID = windowRef.ID
+	workspace.GhosttyTabID = windowRef.SelectedTabID
+
+	for _, paneID := range workspace.PaneIDs {
+		pane := s.state.Panes[paneID]
+		pane.GhosttyTerminalID = terminalRef.ID
+		pane.Mode = model.ModeIdle
+		s.state.Panes[pane.ID] = pane
+	}
+
+	workspace.Status = model.WorkspaceActive
+	s.state.Workspaces[workspace.ID] = workspace
+	return workspace, nil
+}
+
+func (s *Service) workspaceUsesLegacyGhosttySplitsLocked(workspace model.Workspace) bool {
+	if len(workspace.PaneIDs) <= 1 {
+		return false
+	}
+
+	firstPane, ok := s.state.Panes[workspace.PaneIDs[0]]
+	if !ok {
+		return true
+	}
+	for index, paneID := range workspace.PaneIDs {
+		pane, ok := s.state.Panes[paneID]
+		if !ok {
+			return true
+		}
+		if pane.LocalTmuxSession != firstPane.LocalTmuxSession {
+			return true
+		}
+		if pane.GhosttyTerminalID != firstPane.GhosttyTerminalID {
+			return true
+		}
+		if index > 0 && pane.OwnsLocalTmux {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) createCurrentWindowWorkspaceLocked(inspection CurrentFocusInspection, ownsLocalTmux bool) (WorkspaceCreateResult, error) {
@@ -1198,23 +1287,29 @@ func sameFocusContext(left ghostty.FocusContext, right ghostty.FocusContext) boo
 }
 
 func (s *Service) findPaneByTerminalLocked(terminalID string) *model.Pane {
-	for _, pane := range s.state.Panes {
+	var best *model.Pane
+	for _, pane := range model.SortedPanes(s.state) {
 		if pane.GhosttyTerminalID == terminalID {
 			copy := pane
-			return &copy
+			if best == nil || (!best.OwnsLocalTmux && copy.OwnsLocalTmux) {
+				best = &copy
+			}
 		}
 	}
-	return nil
+	return best
 }
 
 func (s *Service) findPaneBySessionLocked(session string) *model.Pane {
-	for _, pane := range s.state.Panes {
+	var best *model.Pane
+	for _, pane := range model.SortedPanes(s.state) {
 		if pane.LocalTmuxSession == session {
 			copy := pane
-			return &copy
+			if best == nil || (!best.OwnsLocalTmux && copy.OwnsLocalTmux) {
+				best = &copy
+			}
 		}
 	}
-	return nil
+	return best
 }
 
 func (s *Service) paneLocked(paneID string) (model.Pane, error) {

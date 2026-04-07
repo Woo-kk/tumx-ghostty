@@ -33,10 +33,10 @@ var commandHelpGroups = []commandHelpGroup{
 	{
 		Name: "Workspace",
 		Commands: []commandHelp{
-			{Usage: "tmux-ghostty workspace create", Summary: "Create a workspace and its first pane."},
+			{Usage: "tmux-ghostty workspace create", Summary: "Create a new Ghostty window and start a workspace from its seed pane."},
 			{Usage: "tmux-ghostty workspace inspect-current", Summary: "Inspect the currently focused Ghostty terminal without launching a new window and report whether it can be adopted into a workspace."},
 			{Usage: "tmux-ghostty workspace bootstrap-current", Summary: "If the current terminal is a local idle shell outside tmux, start a broker-owned tmux session in place and adopt it into a new current-window workspace."},
-			{Usage: "tmux-ghostty workspace split-current --direction up|down|left|right [--claim agent|user]", Summary: "Split the currently focused terminal in place and create the first broker-managed pane of a current-window workspace without opening a new window."},
+			{Usage: "tmux-ghostty workspace split-current --direction up|down|left|right [--claim agent|user]", Summary: "Use Ghostty to split the currently focused terminal once and create the seed pane of a current-window workspace without opening a new window."},
 			{Usage: "tmux-ghostty workspace adopt-current", Summary: "Adopt the currently focused Ghostty terminal into a new workspace without opening a new window. Fail explicitly if the current focus is unsuitable."},
 			{Usage: "tmux-ghostty workspace reconcile", Summary: "Rebuild workspace state from the current Ghostty/tmux view."},
 			{Usage: "tmux-ghostty workspace close <workspace-id>", Summary: "Close a workspace and all panes that belong to it."},
@@ -46,9 +46,9 @@ var commandHelpGroups = []commandHelpGroup{
 		Name: "Pane",
 		Commands: []commandHelp{
 			{Usage: "tmux-ghostty pane list", Summary: "List panes as JSON."},
-			{Usage: "tmux-ghostty pane focus <pane-id>", Summary: "Focus the pane in Ghostty."},
+			{Usage: "tmux-ghostty pane focus <pane-id>", Summary: "Focus the workspace terminal in Ghostty and select the target tmux pane."},
 			{Usage: "tmux-ghostty pane snapshot <pane-id>", Summary: "Capture pane text and metadata from tmux."},
-			{Usage: "tmux-ghostty pane split <pane-id> --direction up|down|left|right [--claim agent|user]", Summary: "Split an existing pane inside the same workspace and return the new pane as JSON."},
+			{Usage: "tmux-ghostty pane split <pane-id> --direction up|down|left|right [--claim agent|user]", Summary: "Use tmux native split-window inside the same workspace and return the new pane as JSON."},
 		},
 	},
 	{
@@ -86,8 +86,9 @@ var commandHelpGroups = []commandHelpGroup{
 var helpNotes = []string{
 	"Most workspace, pane, host, control, and command subcommands auto-start the local broker.",
 	`Use "tmux-ghostty workspace inspect-current" first when you want to stay in the current Ghostty window.`,
-	`If inspect-current reports a local shell outside tmux, run "tmux-ghostty workspace bootstrap-current". If the current terminal is unsuitable but you still want to stay in the current window, run "tmux-ghostty workspace split-current --direction ...". If it reports an existing tmux pane, use "workspace adopt-current".`,
+	`If inspect-current reports a local shell outside tmux, run "tmux-ghostty workspace bootstrap-current". If the current terminal is unsuitable but you still want to stay in the current window, run "tmux-ghostty workspace split-current --direction ..." to create the first Ghostty seed pane. If it reports an existing tmux pane, use "workspace adopt-current".`,
 	`Current-window commands fail explicitly when the focused Ghostty terminal cannot be adopted. They do not auto-open a replacement window.`,
+	`After a workspace exists, additional pane layouts are created inside tmux with "tmux-ghostty pane split" rather than by asking Ghostty to create more terminals.`,
 	`Use "tmux-ghostty pane list" to discover pane IDs before focus, snapshot, host, or control operations.`,
 	"Most query-style commands print JSON.",
 	`Use "tmux-ghostty command preview" before "command send" when you are unsure whether a command is risky.`,

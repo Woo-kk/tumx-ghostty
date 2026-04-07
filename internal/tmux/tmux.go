@@ -22,9 +22,9 @@ func New(runner *execx.Runner) *Client {
 }
 
 func (c *Client) HasSession(name string) (bool, error) {
-	_, err := c.run(defaultTimeout, "has-session", "-t", name)
+	result, err := c.run(defaultTimeout, "has-session", "-t", name)
 	if err != nil {
-		if strings.Contains(err.Error(), "can't find session") {
+		if strings.Contains(result.Stderr, "can't find session") || strings.Contains(err.Error(), "can't find session") || result.ExitCode == 1 {
 			return false, nil
 		}
 		return false, err
@@ -38,10 +38,40 @@ func (c *Client) NewSession(name string) error {
 }
 
 func (c *Client) KillSession(name string) error {
-	_, err := c.run(defaultTimeout, "kill-session", "-t", name)
-	if err != nil && strings.Contains(err.Error(), "can't find session") {
-		return nil
+	result, err := c.run(defaultTimeout, "kill-session", "-t", name)
+	if err != nil {
+		if strings.Contains(result.Stderr, "can't find session") || strings.Contains(err.Error(), "can't find session") || result.ExitCode == 1 {
+			return nil
+		}
+		return err
 	}
+	return nil
+}
+
+func (c *Client) SplitPane(target string, direction string) (string, error) {
+	args := []string{"split-window", "-P", "-F", "#{pane_id}", "-t", normalizeTarget(target)}
+	switch strings.ToLower(strings.TrimSpace(direction)) {
+	case "up":
+		args = append(args, "-v", "-b")
+	case "down":
+		args = append(args, "-v")
+	case "left":
+		args = append(args, "-h", "-b")
+	case "right":
+		args = append(args, "-h")
+	default:
+		return "", fmt.Errorf("unsupported split direction: %q", direction)
+	}
+
+	result, err := c.run(defaultTimeout, args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(result.Stdout), nil
+}
+
+func (c *Client) SelectPane(target string) error {
+	_, err := c.run(defaultTimeout, "select-pane", "-t", normalizeTarget(target))
 	return err
 }
 
@@ -90,8 +120,14 @@ func (c *Client) CurrentCommand(target string) (string, error) {
 }
 
 func (c *Client) TargetAlive(target string) (bool, error) {
-	_, err := c.run(defaultTimeout, "display-message", "-p", "-t", normalizeTarget(target), "#{pane_id}")
+	result, err := c.run(defaultTimeout, "display-message", "-p", "-t", normalizeTarget(target), "#{pane_id}")
 	if err != nil {
+		if strings.Contains(result.Stderr, "can't find pane") || strings.Contains(result.Stderr, "can't find window") {
+			return false, nil
+		}
+		if strings.Contains(result.Stderr, "can't find session") {
+			return false, nil
+		}
 		if strings.Contains(err.Error(), "can't find pane") || strings.Contains(err.Error(), "can't find window") {
 			return false, nil
 		}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -26,11 +27,13 @@ type fakeGhosttyClient struct {
 	tabCounter      int
 	terminalCounter int
 	splitErr        error
+	splitCalls      int
 	requireErr      error
 	requireCalls    int
 	ensureErr       error
 	ensureCalls     int
 	newWindowCalls  int
+	focusCalls      []string
 	inputTextHook   func(string, string) error
 	sendKeyHook     func(string, string, []string) error
 	inspectHook     func() (ghostty.FocusContext, error)
@@ -90,7 +93,10 @@ func (f *fakeGhosttyClient) EnsureRunning() error {
 	return f.ensureErr
 }
 
-func (f *fakeGhosttyClient) FocusTerminal(string) error {
+func (f *fakeGhosttyClient) FocusTerminal(terminalID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.focusCalls = append(f.focusCalls, terminalID)
 	return nil
 }
 func (f *fakeGhosttyClient) InputText(terminalID string, text string) error {
@@ -180,6 +186,7 @@ func (f *fakeGhosttyClient) NewTab(windowID string, _ string) (ghostty.TabRef, g
 func (f *fakeGhosttyClient) SplitTerminal(terminalID string, _ string, _ string) (ghostty.TerminalRef, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.splitCalls++
 	if f.splitErr != nil {
 		return ghostty.TerminalRef{}, f.splitErr
 	}
@@ -886,6 +893,7 @@ func TestProbeCurrentTerminalUsesShortTempScript(t *testing.T) {
 
 func TestSplitPaneAddsPaneToWorkspace(t *testing.T) {
 	service := newTestService(t)
+	fakeGhostty := service.ghostty.(*fakeGhosttyClient)
 	created, err := service.CreateWorkspace()
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -893,6 +901,7 @@ func TestSplitPaneAddsPaneToWorkspace(t *testing.T) {
 	t.Cleanup(func() {
 		_ = service.CloseWorkspace(created.Workspace.ID)
 	})
+	fakeGhostty.splitCalls = 0
 
 	newPane, err := service.SplitPane(created.Pane.ID, "up", "agent")
 	if err != nil {
@@ -904,15 +913,27 @@ func TestSplitPaneAddsPaneToWorkspace(t *testing.T) {
 	if newPane.Controller != model.ControllerAgent {
 		t.Fatalf("expected split pane claim to set controller agent, got %q", newPane.Controller)
 	}
-	if !newPane.OwnsLocalTmux {
-		t.Fatalf("expected broker-created split pane to own its local tmux session")
+	if newPane.OwnsLocalTmux {
+		t.Fatalf("expected tmux-native split pane not to own a local tmux session")
+	}
+	if newPane.LocalTmuxSession != created.Pane.LocalTmuxSession {
+		t.Fatalf("expected split pane to share session %q, got %q", created.Pane.LocalTmuxSession, newPane.LocalTmuxSession)
+	}
+	if newPane.LocalTmuxTarget == created.Pane.LocalTmuxTarget {
+		t.Fatalf("expected split pane to get a distinct tmux target")
+	}
+	if newPane.GhosttyTerminalID != created.Pane.GhosttyTerminalID {
+		t.Fatalf("expected split pane to stay on the seed Ghostty terminal")
+	}
+	if fakeGhostty.splitCalls != 0 {
+		t.Fatalf("expected pane split to avoid Ghostty split, got %d calls", fakeGhostty.splitCalls)
 	}
 	if len(service.state.Workspaces[created.Workspace.ID].PaneIDs) != 2 {
 		t.Fatalf("expected workspace to contain two panes after split")
 	}
 }
 
-func TestSplitPaneRollsBackStateOnGhosttyFailure(t *testing.T) {
+func TestSplitPaneRollsBackStateOnTmuxFailure(t *testing.T) {
 	service := newTestService(t)
 	created, err := service.CreateWorkspace()
 	if err != nil {
@@ -922,8 +943,9 @@ func TestSplitPaneRollsBackStateOnGhosttyFailure(t *testing.T) {
 		_ = service.CloseWorkspace(created.Workspace.ID)
 	})
 
-	fakeGhostty := service.ghostty.(*fakeGhosttyClient)
-	fakeGhostty.splitErr = errors.New("split failed")
+	if err := service.tmux.KillSession(created.Pane.LocalTmuxSession); err != nil {
+		t.Fatalf("kill session: %v", err)
+	}
 	if _, err := service.SplitPane(created.Pane.ID, "right", ""); err == nil {
 		t.Fatalf("expected split pane to fail")
 	}
@@ -932,6 +954,72 @@ func TestSplitPaneRollsBackStateOnGhosttyFailure(t *testing.T) {
 	}
 	if len(service.state.Panes) != 1 {
 		t.Fatalf("expected pane state to roll back on split failure")
+	}
+}
+
+func TestFocusPaneSelectsSharedTmuxPane(t *testing.T) {
+	service := newTestService(t)
+	fakeGhostty := service.ghostty.(*fakeGhosttyClient)
+
+	created, err := service.CreateWorkspace()
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = service.CloseWorkspace(created.Workspace.ID)
+	})
+
+	newPane, err := service.SplitPane(created.Pane.ID, "right", "")
+	if err != nil {
+		t.Fatalf("split pane: %v", err)
+	}
+
+	if err := service.FocusPane(newPane.ID); err != nil {
+		t.Fatalf("focus pane: %v", err)
+	}
+
+	if len(fakeGhostty.focusCalls) == 0 {
+		t.Fatalf("expected focus pane to focus Ghostty terminal first")
+	}
+	if got := fakeGhostty.focusCalls[len(fakeGhostty.focusCalls)-1]; got != created.Pane.GhosttyTerminalID {
+		t.Fatalf("expected focus terminal %q, got %q", created.Pane.GhosttyTerminalID, got)
+	}
+
+	active := activeTmuxPaneID(t, created.Pane.LocalTmuxSession)
+	if active != newPane.LocalTmuxTarget {
+		t.Fatalf("expected active tmux pane %q after focus, got %q", newPane.LocalTmuxTarget, active)
+	}
+}
+
+func TestSplitPaneRejectsLegacyGhosttySplitWorkspace(t *testing.T) {
+	service := newTestService(t)
+
+	workspace := model.NewWorkspace()
+	firstPane := model.NewPane(workspace.ID)
+	secondPane := model.NewPane(workspace.ID)
+	firstPane.GhosttyTerminalID = "ghostty-term-1"
+	secondPane.GhosttyTerminalID = "ghostty-term-2"
+	workspace.PaneIDs = []string{firstPane.ID, secondPane.ID}
+
+	if err := service.tmux.NewSession(firstPane.LocalTmuxSession); err != nil {
+		t.Fatalf("create first session: %v", err)
+	}
+	if err := service.tmux.NewSession(secondPane.LocalTmuxSession); err != nil {
+		t.Fatalf("create second session: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = service.tmux.KillSession(firstPane.LocalTmuxSession)
+		_ = service.tmux.KillSession(secondPane.LocalTmuxSession)
+	})
+
+	service.state.Workspaces[workspace.ID] = workspace
+	service.state.Panes[firstPane.ID] = firstPane
+	service.state.Panes[secondPane.ID] = secondPane
+
+	if _, err := service.SplitPane(firstPane.ID, "up", ""); err == nil {
+		t.Fatalf("expected legacy ghostty-split workspace expansion to fail")
+	} else if !strings.Contains(err.Error(), "legacy ghostty-split pane layout") {
+		t.Fatalf("unexpected legacy split error: %v", err)
 	}
 }
 
@@ -951,6 +1039,118 @@ func TestReconcileDoesNotImportUnmanagedCurrentWindow(t *testing.T) {
 	}
 	if len(service.state.Workspaces) != 0 || len(service.state.Panes) != 0 {
 		t.Fatalf("expected no imported state after reconcile")
+	}
+}
+
+func TestReconcileRebuildsTmuxNativeWorkspaceWithoutGhosttySplit(t *testing.T) {
+	service := newTestService(t)
+	fakeGhostty := service.ghostty.(*fakeGhosttyClient)
+
+	created, err := service.CreateWorkspace()
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	newPane, err := service.SplitPane(created.Pane.ID, "up", "")
+	if err != nil {
+		t.Fatalf("split pane: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = service.CloseWorkspace(created.Workspace.ID)
+	})
+
+	fakeGhostty.mu.Lock()
+	fakeGhostty.windows = map[string]ghostty.WindowRef{}
+	fakeGhostty.tabs = map[string][]ghostty.TabRef{}
+	fakeGhostty.terminals = map[string][]ghostty.TerminalRef{}
+	fakeGhostty.focus = ghostty.FocusContext{}
+	fakeGhostty.newWindowCalls = 0
+	fakeGhostty.splitCalls = 0
+	fakeGhostty.mu.Unlock()
+
+	workspaces, err := service.Reconcile()
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(workspaces) != 1 {
+		t.Fatalf("expected one workspace after rebuild, got %d", len(workspaces))
+	}
+
+	refreshedFirst := service.state.Panes[created.Pane.ID]
+	refreshedSecond := service.state.Panes[newPane.ID]
+	if refreshedFirst.GhosttyTerminalID == "" || refreshedSecond.GhosttyTerminalID == "" {
+		t.Fatalf("expected rebuilt panes to regain a Ghostty terminal")
+	}
+	if refreshedFirst.GhosttyTerminalID != refreshedSecond.GhosttyTerminalID {
+		t.Fatalf("expected rebuilt panes to share one Ghostty terminal, got %q and %q", refreshedFirst.GhosttyTerminalID, refreshedSecond.GhosttyTerminalID)
+	}
+	if refreshedSecond.LocalTmuxTarget != newPane.LocalTmuxTarget {
+		t.Fatalf("expected live tmux session to preserve pane target %q, got %q", newPane.LocalTmuxTarget, refreshedSecond.LocalTmuxTarget)
+	}
+	if fakeGhostty.newWindowCalls != 1 {
+		t.Fatalf("expected rebuild to create exactly one new Ghostty window, got %d", fakeGhostty.newWindowCalls)
+	}
+	if fakeGhostty.splitCalls != 0 {
+		t.Fatalf("expected rebuild to avoid Ghostty split for tmux-native workspace, got %d calls", fakeGhostty.splitCalls)
+	}
+}
+
+func TestReconcileRecreatesTmuxNativeWorkspaceSession(t *testing.T) {
+	service := newTestService(t)
+	fakeGhostty := service.ghostty.(*fakeGhosttyClient)
+
+	created, err := service.CreateWorkspace()
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	newPane, err := service.SplitPane(created.Pane.ID, "right", "")
+	if err != nil {
+		t.Fatalf("split pane: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = service.CloseWorkspace(created.Workspace.ID)
+	})
+
+	if err := service.tmux.KillSession(created.Pane.LocalTmuxSession); err != nil {
+		t.Fatalf("kill session: %v", err)
+	}
+
+	fakeGhostty.mu.Lock()
+	fakeGhostty.windows = map[string]ghostty.WindowRef{}
+	fakeGhostty.tabs = map[string][]ghostty.TabRef{}
+	fakeGhostty.terminals = map[string][]ghostty.TerminalRef{}
+	fakeGhostty.focus = ghostty.FocusContext{}
+	fakeGhostty.newWindowCalls = 0
+	fakeGhostty.splitCalls = 0
+	fakeGhostty.mu.Unlock()
+
+	if _, err := service.Reconcile(); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	refreshedFirst := service.state.Panes[created.Pane.ID]
+	refreshedSecond := service.state.Panes[newPane.ID]
+	if refreshedFirst.GhosttyTerminalID == "" || refreshedSecond.GhosttyTerminalID == "" {
+		t.Fatalf("expected recreated panes to regain a Ghostty terminal")
+	}
+	if refreshedFirst.GhosttyTerminalID != refreshedSecond.GhosttyTerminalID {
+		t.Fatalf("expected recreated panes to share one Ghostty terminal, got %q and %q", refreshedFirst.GhosttyTerminalID, refreshedSecond.GhosttyTerminalID)
+	}
+	if refreshedSecond.OwnsLocalTmux {
+		t.Fatalf("expected recreated split pane to remain a shared-session pane")
+	}
+	if refreshedSecond.LocalTmuxSession != refreshedFirst.LocalTmuxSession {
+		t.Fatalf("expected recreated panes to share session %q, got %q", refreshedFirst.LocalTmuxSession, refreshedSecond.LocalTmuxSession)
+	}
+	if alive, err := service.tmux.TargetAlive(refreshedSecond.LocalTmuxTarget); err != nil {
+		t.Fatalf("check recreated pane target: %v", err)
+	} else if !alive {
+		t.Fatalf("expected recreated split pane target %q to be alive", refreshedSecond.LocalTmuxTarget)
+	}
+	if fakeGhostty.newWindowCalls != 1 {
+		t.Fatalf("expected recreate to open one Ghostty window, got %d", fakeGhostty.newWindowCalls)
+	}
+	if fakeGhostty.splitCalls != 0 {
+		t.Fatalf("expected recreate to avoid Ghostty split for tmux-native workspace, got %d calls", fakeGhostty.splitCalls)
 	}
 }
 
@@ -1145,6 +1345,22 @@ func waitForSocket(t *testing.T, path string) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("socket did not appear: %s", path)
+}
+
+func activeTmuxPaneID(t *testing.T, session string) string {
+	t.Helper()
+	output, err := exec.Command("tmux", "list-panes", "-t", session, "-F", "#{pane_id} #{pane_active}").Output()
+	if err != nil {
+		t.Fatalf("list tmux panes: %v", err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[1] == "1" {
+			return fields[0]
+		}
+	}
+	t.Fatalf("could not resolve active tmux pane for session %s from %q", session, string(output))
+	return ""
 }
 
 func itoa(value int) string {

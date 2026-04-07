@@ -1,6 +1,6 @@
 ---
 name: tmux-ghostty
-description: Use tmux-ghostty to manage local Ghostty/tmux workspaces, current-window bootstrap/adoption, pane control handoff, approvals, and provider-based remote attachment through the local CLI and broker.
+description: Use tmux-ghostty to manage local Ghostty/tmux workspaces, Ghostty seed-pane bootstrap or adoption, tmux-native pane splits, control handoff, approvals, and provider-based remote attachment through the local CLI and broker.
 ---
 
 # Tmux Ghostty
@@ -18,9 +18,10 @@ Do not dump internal package names, JSON-RPC method names, or repository impleme
 The help response should cover these points:
 
 - 这个 skill 用来通过 `tmux-ghostty` 管理本地 Ghostty + tmux 工作区、pane 控制权、命令发送和审批，以及通过远端 provider 挂接远端主机。
-- Ghostty 只是可见终端界面，真正共享的文本状态在 tmux 里，所以用户和 agent 可以围绕同一 pane 协作。
+- Ghostty 只是可见终端界面，真正共享的文本状态在 tmux 里。Ghostty 负责新 window 或当前 window 的第一个 seed pane，后续 pane 由 tmux 原生分屏承载。
+- 同一个 workspace 下，多个 `pane-id` 可以共享同一个 Ghostty terminal；真正区分它们的是各自的 tmux pane target。
 - 多数操作会自动拉起本地 broker，不需要用户先做复杂初始化。
-- 如果用户要求“就在这个窗口里继续”，先走 `workspace inspect-current`；若已经在 tmux 中，再走 `workspace adopt-current`，若只是本地空闲 shell，则走 `workspace bootstrap-current`；这条路径失败时要明确报错，不能假装等价成功。
+- 如果用户要求“就在这个窗口里继续”，先走 `workspace inspect-current`；若已经在 tmux 中，再走 `workspace adopt-current`，若只是本地空闲 shell，则走 `workspace bootstrap-current`；若当前 terminal 不适合直接接管但仍必须留在当前 window，走 `workspace split-current`。这条路径失败时要明确报错，不能假装等价成功。
 - 如果不知道 pane 或 action ID，先执行 `tmux-ghostty pane list` 或 `tmux-ghostty actions`。
 
 The help response should also give a few short example requests such as:
@@ -43,7 +44,8 @@ Keep that response concise and task-oriented.
 3. If the user wants to stay in the current Ghostty window:
    - `tmux-ghostty workspace inspect-current`
    - `tmux-ghostty workspace bootstrap-current` or `tmux-ghostty workspace adopt-current`
-   - `tmux-ghostty pane split <pane-id> --direction up|down|left|right`
+   - If the focused terminal cannot be adopted but the user still wants the current window, use `tmux-ghostty workspace split-current --direction up|down|left|right`
+   - After a workspace exists, use `tmux-ghostty pane split <pane-id> --direction up|down|left|right`
 4. Otherwise create a new workspace:
    - `tmux-ghostty workspace create`
 5. Control and send commands safely:
@@ -55,12 +57,15 @@ Keep that response concise and task-oriented.
 
 ## Capability Boundaries
 
-- `workspace create`: stable path, opens a new Ghostty window.
+- `workspace create`: stable path, opens a new Ghostty window and starts a workspace from its seed pane.
 - `workspace inspect-current`: read-only check of the currently focused Ghostty terminal.
 - `workspace bootstrap-current`: formal path for turning a local idle shell in the current Ghostty terminal into a broker-managed tmux workspace without opening a new window.
+- `workspace split-current`: formal path for using Ghostty to create the first broker-managed seed pane in the current Ghostty window when the focused terminal should not be adopted in place.
 - `workspace adopt-current`: formal path for taking over the current Ghostty window without opening a new one.
 - `workspace reconcile`: restore already known workspaces. It does not import an unmanaged current window, and it does not silently reopen a replacement window for current-window workspaces.
-- `pane split`: formal path for adding panes inside an existing workspace.
+- `pane split`: formal path for adding panes inside an existing workspace with tmux native `split-window`. It does not ask Ghostty to create another terminal.
+- `pane focus`: focuses the shared Ghostty terminal first, then selects the requested tmux pane.
+- Legacy multi-Ghostty workspaces can still be observed, but `pane split` will reject them and require close/recreate.
 - `host attach`: formal remote-provider attach entrypoint. The current built-in provider is JumpServer.
 - If the CLI still lacks a required capability, say so explicitly. Do not silently fall back to ad hoc `tmux` or `osascript` layout surgery.
 
@@ -80,10 +85,12 @@ Keep that response concise and task-oriented.
   - `tmux-ghostty workspace inspect-current`
   - If `adoptable=true`, run `tmux-ghostty workspace adopt-current`
   - If `bootstrappable=true`, run `tmux-ghostty workspace bootstrap-current`
-  - `tmux-ghostty pane split <pane-id> --direction ...`
+  - If neither is true but the user still requires the current window, run `tmux-ghostty workspace split-current --direction ...`
+  - Once a workspace exists, use `tmux-ghostty pane split <pane-id> --direction ...`
 - After `inspect-current`, tell the user whether the focused terminal is directly adoptable or needs bootstrap first.
-- After `bootstrap-current` or `adopt-current`, explicitly state that this run is using the current Ghostty window.
+- After `bootstrap-current`, `adopt-current`, or `split-current`, explicitly state that this run is using the current Ghostty window.
 - If `bootstrap-current` or `adopt-current` fails, explain the reason and stop the current-window flow.
+- If `pane split` reports a legacy ghostty-split layout error, explain that the workspace was created under the old model and must be closed/recreated before further splitting.
 - Only switch to `workspace create` if the user explicitly accepts opening a new Ghostty window.
 
 ### 3. Workspace lifecycle
@@ -98,13 +105,16 @@ Keep that response concise and task-oriented.
 - Bring a pane to the front with `tmux-ghostty pane focus <pane-id>`.
 - Read pane text and metadata with `tmux-ghostty pane snapshot <pane-id>`.
 - Expand an existing workspace in-place with `tmux-ghostty pane split <pane-id> --direction up|down|left|right`.
+- Treat `pane split` as tmux-native layout surgery inside the existing workspace session, not as a request for another Ghostty terminal.
 - Use `--claim agent` or `--claim user` on `pane split` when ownership should be set immediately.
 - When reporting results, describe the pane topology and which host each pane is attached to.
+- Remember that multiple pane IDs may share one Ghostty terminal; rely on `pane-id`, `pane focus`, and `pane snapshot` rather than assuming one terminal per pane.
 
 ### 5. Remote attach
 
 - Use `tmux-ghostty host attach <pane-id> <query>` to attach a pane through the configured remote provider.
 - Treat this as pane-level routing inside the shared terminal model, not as a separate remote shell protocol.
+- `host attach` success means the remote shell is ready. Remote tmux attach is best-effort and is surfaced via `remote_tmux_status` / `remote_tmux_detail` in the returned JSON and pane snapshot.
 - If the current provider is JumpServer and the user only needs remote shell automation rather than the shared Ghostty/tmux UI model, the standalone `tmux-jumpserver` skill may be a better fit.
 
 ### 6. Control handoff
@@ -133,6 +143,7 @@ Keep that response concise and task-oriented.
 - In provider navigation stages, single-token inputs such as `2801`, `/2801`, `1`, or `h` should usually classify as `nav`. If they still come back as `risky`, treat that as a product gap, not as a normal success path.
 - If `host attach` fails and the pane is still in `menu`, `target_search`, or `selection`, inspect `pane snapshot`, read the current `stage`, and continue the menu flow with `command send` instead of abandoning the attach.
 - Use `actions` only when the CLI still requests approval. Do not normalize that as the preferred path for provider navigation menus.
+- If `host attach` returns `remote_tmux_status=unavailable` or `remote_tmux_status=failed`, treat the remote shell as usable unless the pane stage says otherwise. Surface that metadata explicitly instead of calling the attach a failure.
 
 ### 9. Version, updates, and removal
 
@@ -148,11 +159,12 @@ Keep that response concise and task-oriented.
 - Most query-style commands print JSON. Parse the returned structure instead of scraping prose.
 - Most operational subcommands auto-start the broker. Use `up` when you want explicit broker visibility or troubleshooting.
 - Prefer the control-safe sequence `claim` -> `command preview` -> `command send` -> `actions` -> `approve` or `deny`.
-- For current-window requests, prefer `inspect-current` -> (`bootstrap-current` or `adopt-current`) -> `pane split` before considering `workspace create`.
+- For current-window requests, prefer `inspect-current` -> (`bootstrap-current` or `adopt-current` or `split-current`) -> `pane split` before considering `workspace create`.
 - When the user explicitly requires the current window, do not present `workspace create` as an equivalent success path.
 - Do not bypass the approval flow for risky commands.
 - Use `pane snapshot` before and after important transitions when you need verifiable terminal state.
 - Always tell the user whether the result is using the current window or a newly created workspace.
+- In tmux-native workspaces, do not assume one Ghostty terminal per pane. Use `pane focus`, `pane snapshot`, and the pane metadata instead of manipulating Ghostty terminals directly.
 - If the user later agrees to open a new workspace, state clearly that this is a strategy change rather than a silent downgrade.
 - If the CLI still lacks a needed capability, say it is a product limitation instead of pretending the fallback is equivalent.
 - When a request is purely about CLI syntax or command discovery, answer from `tmux-ghostty help` behavior rather than internal package structure.
@@ -163,8 +175,11 @@ Keep that response concise and task-oriented.
 - `workspace bootstrap-current` or `workspace adopt-current` fails:
   Explain the reason.
   Stop the current-window flow unless the user explicitly asks to switch to `workspace create`.
+- `pane split` returns a legacy ghostty-split layout error:
+  Explain that the workspace was created under the older multi-terminal model.
+  Stop expanding that workspace and ask the user to close/recreate it if more panes are required.
 - `host attach` fails while `stage` is `menu`, `target_search`, or `selection`:
-  Read `pane snapshot`, inspect `stage`, and continue with the menu flow instead of improvising unrelated shell commands or giving up.
+  Read `pane snapshot`, inspect `stage`, and continue the menu flow instead of improvising unrelated shell commands or giving up.
 - Query or account selection is ambiguous:
   Report the concrete candidates instead of claiming attach succeeded.
 - A pending approval already exists:
