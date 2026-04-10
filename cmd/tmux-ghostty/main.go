@@ -413,6 +413,27 @@ func runWorkspace(ctx context.Context, paths app.Paths, args []string) int {
 		}
 		fmt.Printf("workspace closed: %s\n", args[1])
 		return 0
+	case "clear":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "workspace id is required")
+			return 1
+		}
+		var result []model.Pane
+		if err := client.Call(ctx, "workspace.clear", map[string]any{"workspace_id": args[1]}, &result); err != nil {
+			return printError(err)
+		}
+		printJSON(result)
+		return 0
+	case "delete":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "workspace id is required")
+			return 1
+		}
+		if err := client.Call(ctx, "workspace.delete", map[string]any{"workspace_id": args[1]}, &struct{}{}); err != nil {
+			return printError(err)
+		}
+		fmt.Printf("workspace deleted: %s\n", args[1])
+		return 0
 	default:
 		usage()
 		return 1
@@ -445,6 +466,27 @@ func runPane(ctx context.Context, paths app.Paths, args []string) int {
 			return printError(err)
 		}
 		fmt.Printf("pane focused: %s\n", args[1])
+		return 0
+	case "clear":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "pane id is required")
+			return 1
+		}
+		var pane model.Pane
+		if err := client.Call(ctx, "pane.clear", map[string]any{"pane_id": args[1]}, &pane); err != nil {
+			return printError(err)
+		}
+		printJSON(pane)
+		return 0
+	case "delete":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "pane id is required")
+			return 1
+		}
+		if err := client.Call(ctx, "pane.delete", map[string]any{"pane_id": args[1]}, &struct{}{}); err != nil {
+			return printError(err)
+		}
+		fmt.Printf("pane deleted: %s\n", args[1])
 		return 0
 	case "snapshot":
 		if len(args) < 2 {

@@ -42,6 +42,8 @@ var commandHelpGroups = []commandHelpGroup{
 			{Usage: "tmux-ghostty workspace adopt-current", Summary: "Adopt the currently focused Ghostty terminal into a new workspace without opening a new window. Fail explicitly if the current focus is unsuitable."},
 			{Usage: "tmux-ghostty workspace reconcile", Summary: "Rebuild workspace state from the current Ghostty/tmux view."},
 			{Usage: "tmux-ghostty workspace close <workspace-id>", Summary: "Close a workspace and all panes that belong to it."},
+			{Usage: "tmux-ghostty workspace clear <workspace-id>", Summary: "Clear tmux screen/history and cached snapshots for every pane in the workspace."},
+			{Usage: "tmux-ghostty workspace delete <workspace-id>", Summary: "Permanently remove a workspace and all of its panes from broker state. Owned local tmux sessions are terminated."},
 		},
 	},
 	{
@@ -49,6 +51,8 @@ var commandHelpGroups = []commandHelpGroup{
 		Commands: []commandHelp{
 			{Usage: "tmux-ghostty pane list", Summary: "List panes as JSON."},
 			{Usage: "tmux-ghostty pane focus <pane-id>", Summary: "Focus the pane in Ghostty."},
+			{Usage: "tmux-ghostty pane clear <pane-id>", Summary: "Clear the pane's tmux screen/history and reset its cached snapshot."},
+			{Usage: "tmux-ghostty pane delete <pane-id>", Summary: "Permanently remove the pane from broker state. Owned local tmux sessions are terminated."},
 			{Usage: "tmux-ghostty pane snapshot <pane-id>", Summary: "Capture pane text and metadata from tmux."},
 			{Usage: "tmux-ghostty pane split <pane-id> --direction up|down|left|right [--claim agent|user]", Summary: "Split an existing pane inside the same workspace and return the new pane as JSON."},
 		},
@@ -92,6 +96,7 @@ var helpNotes = []string{
 	`Current-window commands fail explicitly when the focused Ghostty terminal cannot be adopted. They do not auto-open a replacement window.`,
 	`"workspace split-current" only targets the currently focused Ghostty terminal. Use "workspace split-terminal" when you already know the target terminal ID from "workspace list-windows".`,
 	`Use "tmux-ghostty pane list" to discover pane IDs before focus, snapshot, host, or control operations.`,
+	`"workspace close" keeps a closed workspace record. Use "workspace delete" or "pane delete" when you want permanent removal from broker state.`,
 	"Most query-style commands print JSON.",
 	`Use "tmux-ghostty command preview" before "command send" when you are unsure whether a command is risky.`,
 	`Use "tmux-ghostty actions" to inspect pending approvals, then "approve" or "deny" the action ID.`,

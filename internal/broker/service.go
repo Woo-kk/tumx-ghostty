@@ -42,6 +42,7 @@ type TmuxClient interface {
 	HasSession(name string) (bool, error)
 	NewSession(name string) error
 	KillSession(name string) error
+	ClearPane(target string) error
 	SendKeys(target string, text string) error
 	SendCtrlC(target string) error
 	CapturePane(target string, lines int) (string, error)
@@ -254,8 +255,30 @@ func (s *Service) HandleRPC(ctx context.Context, method string, params json.RawM
 			err = s.CloseWorkspace(req.WorkspaceID)
 			result = Empty{}
 		}
+	case "workspace.clear":
+		var req workspaceCloseRequest
+		if err = decodeParams(params, &req); err == nil {
+			result, err = s.ClearWorkspace(req.WorkspaceID)
+		}
+	case "workspace.delete":
+		var req workspaceCloseRequest
+		if err = decodeParams(params, &req); err == nil {
+			err = s.DeleteWorkspace(req.WorkspaceID)
+			result = Empty{}
+		}
 	case "pane.list":
 		result, err = s.ListPanes()
+	case "pane.clear":
+		var req paneIDRequest
+		if err = decodeParams(params, &req); err == nil {
+			result, err = s.ClearPane(req.PaneID)
+		}
+	case "pane.delete":
+		var req paneIDRequest
+		if err = decodeParams(params, &req); err == nil {
+			err = s.DeletePane(req.PaneID)
+			result = Empty{}
+		}
 	case "pane.focus":
 		var req paneIDRequest
 		if err = decodeParams(params, &req); err == nil {
@@ -580,12 +603,98 @@ func (s *Service) CloseWorkspace(workspaceID string) error {
 	return s.saveLocked()
 }
 
+func (s *Service) ClearWorkspace(workspaceID string) ([]model.Pane, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.touchLocked()
+
+	workspace, ok := s.state.Workspaces[workspaceID]
+	if !ok {
+		return nil, newError(rpc.ReasonInvalidState, fmt.Errorf("workspace not found: %s", workspaceID))
+	}
+	cleared := make([]model.Pane, 0, len(workspace.PaneIDs))
+	for _, paneID := range workspace.PaneIDs {
+		pane, err := s.clearPaneLocked(paneID)
+		if err != nil {
+			return nil, err
+		}
+		cleared = append(cleared, pane)
+	}
+	if err := s.saveLocked(); err != nil {
+		return nil, err
+	}
+	return cleared, nil
+}
+
+func (s *Service) DeleteWorkspace(workspaceID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.touchLocked()
+
+	workspace, ok := s.state.Workspaces[workspaceID]
+	if !ok {
+		return newError(rpc.ReasonInvalidState, fmt.Errorf("workspace not found: %s", workspaceID))
+	}
+	for _, paneID := range append([]string(nil), workspace.PaneIDs...) {
+		pane, ok := s.state.Panes[paneID]
+		if !ok {
+			continue
+		}
+		s.deletePaneArtifactsLocked(pane)
+	}
+	delete(s.state.Workspaces, workspaceID)
+	return s.saveLocked()
+}
+
 func (s *Service) ListPanes() ([]model.Pane, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.touchLocked()
 	panes := model.SortedPanes(s.state)
 	return panes, s.saveLocked()
+}
+
+func (s *Service) ClearPane(paneID string) (model.Pane, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.touchLocked()
+
+	pane, err := s.clearPaneLocked(paneID)
+	if err != nil {
+		return model.Pane{}, err
+	}
+	return pane, s.saveLocked()
+}
+
+func (s *Service) DeletePane(paneID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.touchLocked()
+
+	pane, err := s.paneLocked(paneID)
+	if err != nil {
+		return err
+	}
+	workspace, ok := s.state.Workspaces[pane.WorkspaceID]
+	if !ok {
+		return newError(rpc.ReasonInvalidState, fmt.Errorf("workspace not found: %s", pane.WorkspaceID))
+	}
+
+	s.deletePaneArtifactsLocked(pane)
+	remaining := make([]string, 0, len(workspace.PaneIDs))
+	for _, id := range workspace.PaneIDs {
+		if id != paneID {
+			remaining = append(remaining, id)
+		}
+	}
+	if len(remaining) == 0 {
+		delete(s.state.Workspaces, workspace.ID)
+	} else {
+		workspace.PaneIDs = remaining
+		s.state.Workspaces[workspace.ID] = workspace
+		s.updateWorkspaceStatusLocked(workspace.ID)
+	}
+	return s.saveLocked()
 }
 
 func (s *Service) FocusPane(paneID string) error {
@@ -1238,6 +1347,67 @@ func applyClaimToPane(pane *model.Pane, claim string) error {
 	return nil
 }
 
+func clearPaneSnapshotState(pane model.Pane) model.Pane {
+	now := time.Now().UTC()
+	pane.LastSnapshot = ""
+	pane.LastSnapshotHash = ""
+	pane.LastPrompt = ""
+	pane.LastExitCode = 0
+	pane.LastSnapshotAt = now
+	pane.LastActivityAt = now
+	return pane
+}
+
+func (s *Service) clearPaneLocked(paneID string) (model.Pane, error) {
+	pane, err := s.paneLocked(paneID)
+	if err != nil {
+		return model.Pane{}, err
+	}
+
+	alive, err := s.tmux.TargetAlive(pane.LocalTmuxTarget)
+	if err != nil {
+		return model.Pane{}, newError(rpc.ReasonTmuxUnavailable, err)
+	}
+	if !alive {
+		pane = clearPaneSnapshotState(pane)
+		pane.Mode = model.ModeDisconnected
+		pane.Stage = model.StageUnknown
+		s.state.Panes[pane.ID] = pane
+		s.updateWorkspaceStatusLocked(pane.WorkspaceID)
+		return pane, nil
+	}
+
+	currentCommand, _ := s.tmux.CurrentCommand(pane.LocalTmuxTarget)
+	if observe.IsShellLikeCommand(currentCommand) {
+		if err := s.tmux.SendKeys(pane.LocalTmuxTarget, "clear"); err != nil {
+			return model.Pane{}, newError(rpc.ReasonTmuxUnavailable, err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err := s.tmux.ClearPane(pane.LocalTmuxTarget); err != nil {
+		return model.Pane{}, newError(rpc.ReasonTmuxUnavailable, err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	pane = clearPaneSnapshotState(pane)
+	s.state.Panes[pane.ID] = pane
+	return s.refreshPaneLocked(pane.ID)
+}
+
+func (s *Service) deletePaneArtifactsLocked(pane model.Pane) {
+	if pane.OwnsLocalTmux {
+		_ = s.tmux.KillSession(pane.LocalTmuxSession)
+	}
+	delete(s.state.Panes, pane.ID)
+	delete(s.lastObserved, pane.ID)
+	kept := s.actions[:0]
+	for _, action := range s.actions {
+		if action.PaneID != pane.ID {
+			kept = append(kept, action)
+		}
+	}
+	s.actions = kept
+}
+
 func (s *Service) findPaneByTerminalLocked(terminalID string) *model.Pane {
 	for _, pane := range s.state.Panes {
 		if pane.GhosttyTerminalID == terminalID {
@@ -1317,6 +1487,7 @@ func (s *Service) refreshPaneLocked(paneID string) (model.Pane, error) {
 	if err != nil {
 		return model.Pane{}, newError(rpc.ReasonTmuxUnavailable, err)
 	}
+	text = trimCapturedText(text)
 	now := time.Now().UTC()
 	hash := observe.HashText(text)
 	if hash != pane.LastSnapshotHash {
@@ -1355,6 +1526,20 @@ func (s *Service) refreshPaneLocked(paneID string) (model.Pane, error) {
 	s.state.Panes[pane.ID] = pane
 	s.updateWorkspaceStatusLocked(pane.WorkspaceID)
 	return pane, nil
+}
+
+func trimCapturedText(text string) string {
+	lastFormFeed := strings.LastIndex(text, "\f")
+	lastCaretClear := strings.LastIndex(text, "^L")
+
+	switch {
+	case lastFormFeed >= 0 && lastFormFeed >= lastCaretClear:
+		return strings.TrimLeft(text[lastFormFeed+1:], "\r\n")
+	case lastCaretClear >= 0:
+		return strings.TrimLeft(text[lastCaretClear+len("^L"):], "\r\n")
+	default:
+		return text
+	}
 }
 
 func (s *Service) completeLatestActionLocked(paneID string, status model.ActionStatus) {

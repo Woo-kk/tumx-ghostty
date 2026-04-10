@@ -22,9 +22,9 @@ func New(runner *execx.Runner) *Client {
 }
 
 func (c *Client) HasSession(name string) (bool, error) {
-	_, err := c.run(defaultTimeout, "has-session", "-t", name)
+	result, err := c.run(defaultTimeout, "has-session", "-t", name)
 	if err != nil {
-		if strings.Contains(err.Error(), "can't find session") {
+		if tmuxErrorContains(result, err, "can't find session") {
 			return false, nil
 		}
 		return false, err
@@ -38,10 +38,19 @@ func (c *Client) NewSession(name string) error {
 }
 
 func (c *Client) KillSession(name string) error {
-	_, err := c.run(defaultTimeout, "kill-session", "-t", name)
-	if err != nil && strings.Contains(err.Error(), "can't find session") {
-		return nil
+	result, err := c.run(defaultTimeout, "kill-session", "-t", name)
+	if err != nil {
+		if tmuxErrorContains(result, err, "can't find session") {
+			return nil
+		}
+		return err
 	}
+	return nil
+}
+
+func (c *Client) ClearPane(target string) error {
+	target = normalizeTarget(target)
+	_, err := c.run(defaultTimeout, "clear-history", "-t", target)
 	return err
 }
 
@@ -90,12 +99,9 @@ func (c *Client) CurrentCommand(target string) (string, error) {
 }
 
 func (c *Client) TargetAlive(target string) (bool, error) {
-	_, err := c.run(defaultTimeout, "display-message", "-p", "-t", normalizeTarget(target), "#{pane_id}")
+	result, err := c.run(defaultTimeout, "display-message", "-p", "-t", normalizeTarget(target), "#{pane_id}")
 	if err != nil {
-		if strings.Contains(err.Error(), "can't find pane") || strings.Contains(err.Error(), "can't find window") {
-			return false, nil
-		}
-		if strings.Contains(err.Error(), "can't find session") {
+		if tmuxErrorContains(result, err, "can't find pane", "can't find window", "can't find session") {
 			return false, nil
 		}
 		return false, err
@@ -120,4 +126,20 @@ func normalizeTarget(target string) string {
 		return target
 	}
 	return target + ":0.0"
+}
+
+func tmuxErrorContains(result execx.Result, err error, fragments ...string) bool {
+	text := result.Stderr
+	if err != nil {
+		if text != "" {
+			text += "\n"
+		}
+		text += err.Error()
+	}
+	for _, fragment := range fragments {
+		if strings.Contains(text, fragment) {
+			return true
+		}
+	}
+	return false
 }

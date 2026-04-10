@@ -89,12 +89,17 @@ tmux-ghostty status
 
 tmux-ghostty workspace create
 tmux-ghostty workspace inspect-current
+tmux-ghostty workspace bootstrap-current
 tmux-ghostty workspace adopt-current
 tmux-ghostty workspace reconcile
 tmux-ghostty workspace close <workspace-id>
+tmux-ghostty workspace clear <workspace-id>
+tmux-ghostty workspace delete <workspace-id>
 
 tmux-ghostty pane list
 tmux-ghostty pane focus <pane-id>
+tmux-ghostty pane clear <pane-id>
+tmux-ghostty pane delete <pane-id>
 tmux-ghostty pane snapshot <pane-id>
 tmux-ghostty pane split <pane-id> --direction up|down|left|right [--claim agent|user]
 
@@ -117,7 +122,9 @@ tmux-ghostty help
 
 `tmux-ghostty help` 是权威的详细命令参考。README 只保留高层级命令树，具体命令说明请以 CLI 输出为准。`tmux-ghostty -h` 和 `tmux-ghostty --help` 是等价别名。
 
-`tmux-ghostty workspace inspect-current` 会报告当前焦点 Ghostty terminal 是否可被接管。`tmux-ghostty workspace adopt-current` 会在当前 Ghostty 窗口内继续工作，而不是新开窗口。当前窗口模式下，CLI 不会再隐式拉起替代用的 Ghostty window；如果前台窗口、焦点 terminal 或 tmux 上下文不满足要求，它会明确失败。`tmux-ghostty pane split` 是在已有 workspace 内正式扩 pane 的入口。
+`tmux-ghostty workspace inspect-current` 会报告当前焦点 Ghostty terminal 是否可被接管，还是需要先 bootstrap。若当前 terminal 只是本地空闲 shell 且尚未进入 tmux，可用 `tmux-ghostty workspace bootstrap-current` 原地拉起 broker 管理的 tmux session 并接管；若已经在本地 tmux pane 中，则用 `tmux-ghostty workspace adopt-current` 在当前 Ghostty 窗口内继续工作，而不是新开窗口。当前窗口模式下，CLI 不会再隐式拉起替代用的 Ghostty window；如果前台窗口、焦点 terminal 或 tmux 上下文不满足要求，它会明确失败。`tmux-ghostty pane split` 是在已有 workspace 内正式扩 pane 的入口。
+
+`tmux-ghostty pane clear` 和 `tmux-ghostty workspace clear` 会清理 tmux-ghostty 记录的 pane 屏幕快照，并清空对应 pane 或 workspace 的 tmux scrollback。`tmux-ghostty pane delete` 和 `tmux-ghostty workspace delete` 会永久删除对应 pane 或 workspace 的 broker 状态，并终止其归 broker 所有的本地 tmux session。
 
 `tmux-ghostty version` 会输出构建元信息。`tmux-ghostty self-update` 会用 GitHub Release 中的安装包覆盖当前安装。`tmux-ghostty uninstall` 会同时删除两个已安装二进制和当前用户的运行时数据。
 

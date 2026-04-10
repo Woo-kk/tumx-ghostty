@@ -91,11 +91,15 @@ Keep that response concise and task-oriented.
 - Create a new shared terminal workspace with `tmux-ghostty workspace create`.
 - Re-sync state from the current Ghostty/tmux view with `tmux-ghostty workspace reconcile`.
 - Close a workspace and all of its panes with `tmux-ghostty workspace close <workspace-id>`.
+- Clear tmux-backed screen state for every pane in a workspace with `tmux-ghostty workspace clear <workspace-id>`.
+- Permanently remove a workspace and all of its panes from broker state with `tmux-ghostty workspace delete <workspace-id>`.
 
 ### 4. Pane inspection, split, and focus
 
 - Discover pane IDs with `tmux-ghostty pane list`.
 - Bring a pane to the front with `tmux-ghostty pane focus <pane-id>`.
+- Clear a pane's tmux-backed screen state with `tmux-ghostty pane clear <pane-id>`.
+- Permanently remove a pane from broker state with `tmux-ghostty pane delete <pane-id>`.
 - Read pane text and metadata with `tmux-ghostty pane snapshot <pane-id>`.
 - Expand an existing workspace in-place with `tmux-ghostty pane split <pane-id> --direction up|down|left|right`.
 - Use `--claim agent` or `--claim user` on `pane split` when ownership should be set immediately.

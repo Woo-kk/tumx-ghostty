@@ -1146,6 +1146,264 @@ func TestSplitPaneRollsBackStateOnGhosttyFailure(t *testing.T) {
 	}
 }
 
+func TestDeletePaneRemovesPaneArtifacts(t *testing.T) {
+	service := newTestService(t)
+	created, err := service.CreateWorkspace()
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	second, err := service.SplitPane(created.Pane.ID, "up", "")
+	if err != nil {
+		t.Fatalf("split pane: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = service.CloseWorkspace(created.Workspace.ID)
+		_ = service.tmux.KillSession(created.Pane.LocalTmuxSession)
+		_ = service.tmux.KillSession(second.LocalTmuxSession)
+	})
+
+	keepAction := model.NewAction(created.Pane.ID, "agent", "echo keep", "echo keep", model.RiskRead, model.ApprovalNotRequired, model.ActionQueued)
+	dropAction := model.NewAction(second.ID, "agent", "echo drop", "echo drop", model.RiskRead, model.ApprovalPending, model.ActionQueued)
+	service.actions = []model.Action{keepAction, dropAction}
+	service.lastObserved[created.Pane.ID] = time.Now().UTC()
+	service.lastObserved[second.ID] = time.Now().UTC()
+
+	if err := service.DeletePane(second.ID); err != nil {
+		t.Fatalf("delete pane: %v", err)
+	}
+
+	workspace, ok := service.state.Workspaces[created.Workspace.ID]
+	if !ok {
+		t.Fatalf("expected workspace %s to remain", created.Workspace.ID)
+	}
+	if len(workspace.PaneIDs) != 1 || workspace.PaneIDs[0] != created.Pane.ID {
+		t.Fatalf("unexpected workspace pane ids after delete: %+v", workspace.PaneIDs)
+	}
+	if _, ok := service.state.Panes[second.ID]; ok {
+		t.Fatalf("expected deleted pane %s to be removed from state", second.ID)
+	}
+	if _, ok := service.lastObserved[second.ID]; ok {
+		t.Fatalf("expected deleted pane %s observation state to be removed", second.ID)
+	}
+	if _, ok := service.lastObserved[created.Pane.ID]; !ok {
+		t.Fatalf("expected remaining pane %s observation state to stay", created.Pane.ID)
+	}
+	if len(service.actions) != 1 || service.actions[0].ID != keepAction.ID {
+		t.Fatalf("unexpected actions after pane delete: %+v", service.actions)
+	}
+
+	secondAlive, err := service.tmux.HasSession(second.LocalTmuxSession)
+	if err != nil {
+		t.Fatalf("check deleted pane session: %v", err)
+	}
+	if secondAlive {
+		t.Fatalf("expected deleted pane session %s to be terminated", second.LocalTmuxSession)
+	}
+	createdAlive, err := service.tmux.HasSession(created.Pane.LocalTmuxSession)
+	if err != nil {
+		t.Fatalf("check remaining pane session: %v", err)
+	}
+	if !createdAlive {
+		t.Fatalf("expected remaining pane session %s to stay alive", created.Pane.LocalTmuxSession)
+	}
+}
+
+func TestDeletePaneRemovesWorkspaceWhenLastPaneDeleted(t *testing.T) {
+	service := newTestService(t)
+	created, err := service.CreateWorkspace()
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = service.tmux.KillSession(created.Pane.LocalTmuxSession)
+	})
+
+	service.actions = []model.Action{
+		model.NewAction(created.Pane.ID, "agent", "echo drop", "echo drop", model.RiskRead, model.ApprovalPending, model.ActionQueued),
+	}
+	service.lastObserved[created.Pane.ID] = time.Now().UTC()
+
+	if err := service.DeletePane(created.Pane.ID); err != nil {
+		t.Fatalf("delete last pane: %v", err)
+	}
+
+	if _, ok := service.state.Workspaces[created.Workspace.ID]; ok {
+		t.Fatalf("expected workspace %s to be removed with its last pane", created.Workspace.ID)
+	}
+	if _, ok := service.state.Panes[created.Pane.ID]; ok {
+		t.Fatalf("expected last pane %s to be removed from state", created.Pane.ID)
+	}
+	if _, ok := service.lastObserved[created.Pane.ID]; ok {
+		t.Fatalf("expected last observed entry for %s to be removed", created.Pane.ID)
+	}
+	if len(service.actions) != 0 {
+		t.Fatalf("expected pane delete to remove related actions, got %+v", service.actions)
+	}
+
+	alive, err := service.tmux.HasSession(created.Pane.LocalTmuxSession)
+	if err != nil {
+		t.Fatalf("check deleted session: %v", err)
+	}
+	if alive {
+		t.Fatalf("expected last pane session %s to be terminated", created.Pane.LocalTmuxSession)
+	}
+}
+
+func TestDeleteWorkspaceRemovesWorkspaceArtifacts(t *testing.T) {
+	service := newTestService(t)
+	created, err := service.CreateWorkspace()
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	second, err := service.SplitPane(created.Pane.ID, "up", "")
+	if err != nil {
+		t.Fatalf("split pane: %v", err)
+	}
+	other, err := service.CreateWorkspace()
+	if err != nil {
+		t.Fatalf("create other workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = service.CloseWorkspace(other.Workspace.ID)
+		_ = service.tmux.KillSession(created.Pane.LocalTmuxSession)
+		_ = service.tmux.KillSession(second.LocalTmuxSession)
+		_ = service.tmux.KillSession(other.Pane.LocalTmuxSession)
+	})
+
+	keepAction := model.NewAction(other.Pane.ID, "agent", "echo keep", "echo keep", model.RiskRead, model.ApprovalNotRequired, model.ActionQueued)
+	dropActionOne := model.NewAction(created.Pane.ID, "agent", "echo drop-one", "echo drop-one", model.RiskRead, model.ApprovalPending, model.ActionQueued)
+	dropActionTwo := model.NewAction(second.ID, "agent", "echo drop-two", "echo drop-two", model.RiskRead, model.ApprovalPending, model.ActionQueued)
+	service.actions = []model.Action{dropActionOne, keepAction, dropActionTwo}
+	service.lastObserved[created.Pane.ID] = time.Now().UTC()
+	service.lastObserved[second.ID] = time.Now().UTC()
+	service.lastObserved[other.Pane.ID] = time.Now().UTC()
+
+	if err := service.DeleteWorkspace(created.Workspace.ID); err != nil {
+		t.Fatalf("delete workspace: %v", err)
+	}
+
+	if _, ok := service.state.Workspaces[created.Workspace.ID]; ok {
+		t.Fatalf("expected deleted workspace %s to be removed from state", created.Workspace.ID)
+	}
+	if _, ok := service.state.Panes[created.Pane.ID]; ok {
+		t.Fatalf("expected deleted workspace pane %s to be removed from state", created.Pane.ID)
+	}
+	if _, ok := service.state.Panes[second.ID]; ok {
+		t.Fatalf("expected deleted workspace pane %s to be removed from state", second.ID)
+	}
+	if _, ok := service.lastObserved[created.Pane.ID]; ok {
+		t.Fatalf("expected deleted workspace pane %s observation state to be removed", created.Pane.ID)
+	}
+	if _, ok := service.lastObserved[second.ID]; ok {
+		t.Fatalf("expected deleted workspace pane %s observation state to be removed", second.ID)
+	}
+	if _, ok := service.state.Workspaces[other.Workspace.ID]; !ok {
+		t.Fatalf("expected unrelated workspace %s to remain", other.Workspace.ID)
+	}
+	if _, ok := service.state.Panes[other.Pane.ID]; !ok {
+		t.Fatalf("expected unrelated pane %s to remain", other.Pane.ID)
+	}
+	if _, ok := service.lastObserved[other.Pane.ID]; !ok {
+		t.Fatalf("expected unrelated observation state for %s to remain", other.Pane.ID)
+	}
+	if len(service.actions) != 1 || service.actions[0].ID != keepAction.ID {
+		t.Fatalf("unexpected actions after workspace delete: %+v", service.actions)
+	}
+
+	for _, session := range []string{created.Pane.LocalTmuxSession, second.LocalTmuxSession} {
+		alive, err := service.tmux.HasSession(session)
+		if err != nil {
+			t.Fatalf("check deleted workspace session %s: %v", session, err)
+		}
+		if alive {
+			t.Fatalf("expected deleted workspace session %s to be terminated", session)
+		}
+	}
+	otherAlive, err := service.tmux.HasSession(other.Pane.LocalTmuxSession)
+	if err != nil {
+		t.Fatalf("check unrelated workspace session: %v", err)
+	}
+	if !otherAlive {
+		t.Fatalf("expected unrelated workspace session %s to remain", other.Pane.LocalTmuxSession)
+	}
+}
+
+func TestClearPaneClearsTmuxHistoryAndCachedSnapshot(t *testing.T) {
+	service := newTestService(t)
+	created, err := service.CreateWorkspace()
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = service.CloseWorkspace(created.Workspace.ID)
+	})
+
+	sendMarkerAndWait(t, service, created.Pane.ID, "CLEAR_MARKER_SINGLE")
+
+	cleared, err := service.ClearPane(created.Pane.ID)
+	if err != nil {
+		t.Fatalf("clear pane: %v", err)
+	}
+	if strings.Contains(cleared.LastSnapshot, "CLEAR_MARKER_SINGLE") {
+		t.Fatalf("expected cleared pane snapshot to drop marker, got %q", cleared.LastSnapshot)
+	}
+
+	snapshot, err := waitForSnapshotWithout(t, service, created.Pane.ID, "CLEAR_MARKER_SINGLE")
+	if err != nil {
+		t.Fatalf("wait for cleared snapshot: %v", err)
+	}
+	if strings.Contains(snapshot.Text, "CLEAR_MARKER_SINGLE") {
+		t.Fatalf("expected pane snapshot to stay cleared, got %q", snapshot.Text)
+	}
+
+	paneState := service.state.Panes[created.Pane.ID]
+	if strings.Contains(paneState.LastSnapshot, "CLEAR_MARKER_SINGLE") {
+		t.Fatalf("expected cached pane snapshot to be refreshed without marker, got %q", paneState.LastSnapshot)
+	}
+}
+
+func TestClearWorkspaceClearsAllPaneSnapshots(t *testing.T) {
+	service := newTestService(t)
+	created, err := service.CreateWorkspace()
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	second, err := service.SplitPane(created.Pane.ID, "up", "")
+	if err != nil {
+		t.Fatalf("split pane: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = service.CloseWorkspace(created.Workspace.ID)
+		_ = service.tmux.KillSession(second.LocalTmuxSession)
+	})
+
+	sendMarkerAndWait(t, service, created.Pane.ID, "CLEAR_MARKER_WORKSPACE_ONE")
+	sendMarkerAndWait(t, service, second.ID, "CLEAR_MARKER_WORKSPACE_TWO")
+
+	cleared, err := service.ClearWorkspace(created.Workspace.ID)
+	if err != nil {
+		t.Fatalf("clear workspace: %v", err)
+	}
+	if len(cleared) != 2 {
+		t.Fatalf("expected two cleared panes, got %d", len(cleared))
+	}
+
+	snapshotOne, err := waitForSnapshotWithout(t, service, created.Pane.ID, "CLEAR_MARKER_WORKSPACE_ONE")
+	if err != nil {
+		t.Fatalf("wait for cleared first pane snapshot: %v", err)
+	}
+	if strings.Contains(snapshotOne.Text, "CLEAR_MARKER_WORKSPACE_ONE") {
+		t.Fatalf("expected first pane snapshot to stay cleared, got %q", snapshotOne.Text)
+	}
+	snapshotTwo, err := waitForSnapshotWithout(t, service, second.ID, "CLEAR_MARKER_WORKSPACE_TWO")
+	if err != nil {
+		t.Fatalf("wait for cleared second pane snapshot: %v", err)
+	}
+	if strings.Contains(snapshotTwo.Text, "CLEAR_MARKER_WORKSPACE_TWO") {
+		t.Fatalf("expected second pane snapshot to stay cleared, got %q", snapshotTwo.Text)
+	}
+}
+
 func TestReconcileDoesNotImportUnmanagedCurrentWindow(t *testing.T) {
 	service := newTestService(t)
 	fakeGhostty := service.ghostty.(*fakeGhosttyClient)
@@ -1333,6 +1591,51 @@ func waitForSnapshot(t *testing.T, service *Service, paneID string, substring st
 		time.Sleep(200 * time.Millisecond)
 	}
 	return model.PaneSnapshot{}, context.DeadlineExceeded
+}
+
+func waitForSnapshotWithout(t *testing.T, service *Service, paneID string, substring string) (model.PaneSnapshot, error) {
+	t.Helper()
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		snapshot, err := service.SnapshotPane(paneID)
+		if err != nil {
+			return model.PaneSnapshot{}, err
+		}
+		if !strings.Contains(snapshot.Text, substring) {
+			return snapshot, nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return model.PaneSnapshot{}, context.DeadlineExceeded
+}
+
+func sendMarkerAndWait(t *testing.T, service *Service, paneID string, marker string) {
+	t.Helper()
+	if _, err := service.Claim(paneID, "agent"); err != nil {
+		t.Fatalf("claim pane %s: %v", paneID, err)
+	}
+	markerFile := filepath.Join(t.TempDir(), "marker.txt")
+	if err := os.WriteFile(markerFile, []byte(marker+"\n"), 0o600); err != nil {
+		t.Fatalf("write marker file for pane %s: %v", paneID, err)
+	}
+	command := "cat " + execx.ShellQuote(markerFile)
+	preview, err := service.PreviewCommand(paneID, "agent", command)
+	if err != nil {
+		t.Fatalf("preview marker command for pane %s: %v", paneID, err)
+	}
+	if preview.RequiresApproval {
+		if preview.Action == nil {
+			t.Fatalf("expected approval action for marker command on pane %s", paneID)
+		}
+		if _, err := service.Approve(preview.Action.ID); err != nil {
+			t.Fatalf("approve marker command for pane %s: %v", paneID, err)
+		}
+	} else if _, err := service.SendCommand(paneID, "agent", command, ""); err != nil {
+		t.Fatalf("send marker to pane %s: %v", paneID, err)
+	}
+	if _, err := waitForSnapshot(t, service, paneID, marker); err != nil {
+		t.Fatalf("wait for marker %s in pane %s: %v", marker, paneID, err)
+	}
 }
 
 func waitForFile(path string, timeout time.Duration) error {
